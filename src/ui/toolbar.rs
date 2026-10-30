@@ -2,6 +2,13 @@
 
 use crate::gfx::anim::{AnimSpec, Ease, apply_offset_x, apply_offset_y, apply_opacity, apply_scale, set_opacity};
 use crate::gfx::backdrop::{self, Capture, PlateSpec};
+use crate::i18n::{t, tf};
+use crate::model::entries::{self, Entry};
+use crate::ui::edit_entry::{self, EditResult};
+use crate::ui::menu::{Menu, MenuItem, PickFn};
+use std::path::PathBuf;
+use windows::Win32::Graphics::Dwm::DwmFlush;
+use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use crate::gfx::draw::{self, Glyph, Surface, TextStyle, create_surface};
 use crate::gfx::{Gfx, pt};
 use crate::icons::cache::{IconCache, Record, fingerprint_for};
@@ -271,6 +278,7 @@ impl Toolbar {
         }
         win.commit()?;
         self.visible = true;
+        crate::app::set_bar_visible(true);
         if let Some(t) = self.perf_start.take() {
             log_info!("perf first-frame {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
         }
@@ -836,7 +844,272 @@ impl Toolbar {
 
     /// Menú contextual; `at` en coordenadas físicas de pantalla, o bajo la celda si es `None`.
     pub fn open_context_menu(&mut self, h: Hit, at: Option<(i32, i32)>) {
-        log_info!("context menu for {h:?} at {at:?} (pending task)");
+        let n = self.entries.borrow().entries.len();
+        let (items, target) = match h {
+            Hit::Cell(i) => {
+                let items = vec![
+                    MenuItem::new(1, t("menu.open"), Some(Glyph::Play)),
+                    MenuItem::new(2, t("menu.open_location"), Some(Glyph::Folder)),
+                    MenuItem::new(3, t("menu.edit"), Some(Glyph::Pencil)).separated(),
+                    MenuItem::new(4, t("menu.move_left"), Some(Glyph::ArrowLeft)).disabled(i == 0),
+                    MenuItem::new(5, t("menu.move_right"), Some(Glyph::ArrowRight)).disabled(i + 1 >= n),
+                    MenuItem::new(6, t("menu.remove"), Some(Glyph::Trash)).separated().danger(),
+                ];
+                (items, Some(i))
+            }
+            Hit::Plate | Hit::Outside | Hit::ArrowLeft | Hit::ArrowRight => {
+                (vec![MenuItem::new(10, t("menu.new_entry"), Some(Glyph::Plus)), MenuItem::new(11, t("menu.settings"), Some(Glyph::Gear))], None)
+            }
+            Hit::Add | Hit::Settings => return,
+        };
+        let (x, y) = match at {
+            Some(p) => p,
+            None => {
+                let Some(win) = &self.win else { return };
+                let r = self.rect_for(h).unwrap_or(self.layout.plate);
+                let wr = win.rect();
+                (wr.left + self.phys(r.x) as i32, wr.top + self.phys(r.bottom()) as i32 + 4)
+            }
+        };
+        let id = target.and_then(|i| self.entries.borrow().entries.get(i).map(|e| e.id.clone()));
+        let weak = self.self_weak.clone();
+        let on_pick: PickFn = Box::new(move |pick| {
+            if let Some(rc) = weak.upgrade() {
+                if let Ok(mut tb) = rc.try_borrow_mut() {
+                    tb.on_menu_pick(pick, id.clone());
+                }
+            }
+        });
+        if let Err(e) = Menu::open(&self.gfx, &self.pal, items, x, y, self.animate, on_pick) {
+            log_warn!("menu failed: {e}");
+        }
+    }
+
+    fn on_menu_pick(&mut self, pick: Option<u32>, id: Option<String>) {
+        let idx = id.as_deref().and_then(|i| self.entries.borrow().index_of(i));
+        match (pick, idx) {
+            (Some(1), Some(i)) => self.launch_entry(i),
+            (Some(2), Some(i)) => {
+                let path = self.entries.borrow().entries.get(i).map(|e| e.path.clone());
+                if let Some(p) = path {
+                    crate::launch::open_location(&p);
+                }
+                self.hide();
+            }
+            (Some(3), Some(i)) => self.open_edit(Some(i)),
+            (Some(4), Some(_)) | (Some(5), Some(_)) => {
+                if let Some(id) = &id {
+                    let mut es = self.entries.borrow_mut();
+                    if pick == Some(4) {
+                        es.move_left(id);
+                    } else {
+                        es.move_right(id);
+                    }
+                    if let Err(e) = es.save(&fsx::entries_path()) {
+                        log_warn!("entries.json save failed: {e}");
+                    }
+                }
+                self.rebuild();
+                self.refocus();
+            }
+            (Some(6), Some(i)) => self.confirm_remove(i),
+            (Some(10), _) => self.open_edit(None),
+            (Some(11), _) => self.open_settings(),
+            _ => self.refocus(),
+        }
+    }
+
+    /// Vuelve a poner la barra en primer plano tras cerrar un menú o un diálogo.
+    fn refocus(&self) {
+        if self.visible {
+            if let Some(w) = &self.win {
+                unsafe {
+                    let _ = SetForegroundWindow(w.hwnd);
+                }
+            }
+        }
+    }
+
+    /// Captura lo que hay detrás del plato con la barra ya visible: la oculta un frame.
+    fn capture_behind(&mut self, wx: i32, wy: i32) -> Option<Capture> {
+        if let (Some(g), Some(win)) = (&self.group, &self.win) {
+            let _ = set_opacity(g, 0.0);
+            let _ = win.commit();
+            unsafe {
+                let _ = DwmFlush();
+                let _ = DwmFlush();
+            }
+        }
+        let plate = self.layout.plate;
+        let hdr = self.mon.as_ref().map(|m| backdrop::output_is_hdr(m.handle)).unwrap_or(false);
+        if hdr {
+            return None;
+        }
+        backdrop::capture_screen_div(wx + self.phys(plate.x) as i32, wy + self.phys(plate.y) as i32, self.phys(plate.w) as u32, self.phys(plate.h) as u32, 2)
+    }
+
+    /// Reconstruye la barra visible con las entradas actuales, sin animación de apertura.
+    pub fn rebuild(&mut self) {
+        if !self.visible {
+            return;
+        }
+        let Some(mon) = self.mon.as_ref().map(|m| m.work) else { return };
+        self.hide_tooltip();
+        self.hover = Hit::Outside;
+        self.pressed = None;
+        self.focus = None;
+        self.drag = None;
+        self.relayout();
+        let (lx, ly) = layout::window_position(&self.layout, mon);
+        let (wx, wy) = (self.phys(lx) as i32, self.phys(ly) as i32);
+        let (ww, wh) = (self.phys(self.layout.window.0) as i32, self.phys(self.layout.window.1) as i32);
+        let cap = self.capture_behind(wx, wy);
+        if let Some(win) = &self.win {
+            win.move_to(wx, wy, ww, wh);
+        }
+        self.load_icons();
+        if let Err(e) = self.build_visuals(cap.as_ref()) {
+            log_warn!("rebuild failed: {e}");
+        }
+        self.commit();
+    }
+
+    fn open_edit(&mut self, idx: Option<usize>) {
+        let existing = idx.and_then(|i| self.entries.borrow().entries.get(i).cloned());
+        let eid = existing.as_ref().map(|e| e.id.clone());
+        let weak = self.self_weak.clone();
+        let on_done: Box<dyn FnOnce(Option<EditResult>)> = Box::new(move |res| {
+            if let (Some(r), Some(rc)) = (res, weak.upgrade()) {
+                if let Ok(mut tb) = rc.try_borrow_mut() {
+                    tb.apply_edit(eid, r);
+                }
+            }
+        });
+        match edit_entry::open(&self.gfx, &self.pal, existing, on_done) {
+            Ok(()) => self.hide(),
+            Err(e) => log_warn!("edit dialog failed: {e}"),
+        }
+    }
+
+    fn apply_edit(&mut self, id: Option<String>, r: EditResult) {
+        let icons_dir = fsx::icons_dir();
+        let mut es = self.entries.borrow_mut();
+        let existing_idx = id.as_deref().and_then(|i| es.index_of(i));
+        let entry_id = match existing_idx {
+            Some(i) => es.entries[i].id.clone(),
+            None => entries::new_id(),
+        };
+        let old_custom = existing_idx.and_then(|i| match &es.entries[i].icon {
+            IconSource::Custom { file } => Some(icons_dir.join(file)),
+            _ => None,
+        });
+        let icon = match (&r.icon, &r.custom_src) {
+            (IconSource::Custom { file }, Some(src)) if file.is_empty() => {
+                if edit_entry::is_image(src) {
+                    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png").to_ascii_lowercase();
+                    let name = format!("{entry_id}.{ext}");
+                    match std::fs::copy(src, icons_dir.join(&name)) {
+                        Ok(_) => IconSource::Custom { file: name },
+                        Err(e) => {
+                            log_warn!("icon copy failed: {e}");
+                            IconSource::None
+                        }
+                    }
+                } else {
+                    let name = format!("{entry_id}.png");
+                    let ok = self.gfx.wic().ok().and_then(|wic| {
+                        let bgra = crate::icons::extract::extract_file_icon(src, 256)?;
+                        crate::icons::extract::encode_png(wic, 256, &bgra, &icons_dir.join(&name)).ok()
+                    });
+                    if ok.is_some() { IconSource::Custom { file: name } } else { IconSource::None }
+                }
+            }
+            (IconSource::Custom { file }, _) => IconSource::Custom { file: file.clone() },
+            (other, _) => other.clone(),
+        };
+        if let Some(old) = old_custom {
+            let keep = matches!(&icon, IconSource::Custom { file } if icons_dir.join(file) == old);
+            if !keep {
+                let _ = std::fs::remove_file(old);
+            }
+        }
+        match existing_idx {
+            Some(i) => {
+                let e = &mut es.entries[i];
+                e.name = r.name;
+                e.path = r.path;
+                e.icon = icon;
+            }
+            None => es.add(Entry { id: entry_id, name: r.name, path: r.path, icon, created_at: fsx::now_iso(), extra: Default::default() }),
+        }
+        if let Err(e) = es.save(&fsx::entries_path()) {
+            log_warn!("entries.json save failed: {e}");
+        }
+        drop(es);
+        self.rebuild();
+    }
+
+    fn confirm_remove(&mut self, i: usize) {
+        let Some((id, name)) = self.entries.borrow().entries.get(i).map(|e| (e.id.clone(), e.name.clone())) else { return };
+        let weak = self.self_weak.clone();
+        let on_done: Box<dyn FnOnce(bool)> = Box::new(move |ok| {
+            if let Some(rc) = weak.upgrade() {
+                if let Ok(mut tb) = rc.try_borrow_mut() {
+                    if ok {
+                        tb.remove_entry(&id);
+                    }
+                    tb.refocus();
+                }
+            }
+        });
+        let text = tf("dialog.remove_text", &[&name]);
+        if let Err(e) = crate::ui::confirm::open(&self.gfx, &self.pal, t("dialog.remove_title"), &text, t("dialog.remove_confirm"), on_done) {
+            log_warn!("confirm dialog failed: {e}");
+        }
+    }
+
+    fn remove_entry(&mut self, id: &str) {
+        let removed = self.entries.borrow_mut().remove(id);
+        if let Some(e) = removed {
+            if let IconSource::Custom { file } = e.icon {
+                let _ = std::fs::remove_file(fsx::icons_dir().join(file));
+            }
+            if let Err(e) = self.entries.borrow().save(&fsx::entries_path()) {
+                log_warn!("entries.json save failed: {e}");
+            }
+        }
+        self.rebuild();
+    }
+
+    fn add_dropped(&mut self, paths: Vec<PathBuf>) {
+        let mut added = 0;
+        let mut rejected = 0;
+        {
+            let mut es = self.entries.borrow_mut();
+            for p in paths {
+                if entries::is_supported(&p) {
+                    es.add(Entry::for_file(&p));
+                    added += 1;
+                } else {
+                    rejected += 1;
+                }
+            }
+            if added > 0 {
+                if let Err(e) = es.save(&fsx::entries_path()) {
+                    log_warn!("entries.json save failed: {e}");
+                }
+            }
+        }
+        if added > 0 {
+            self.rebuild();
+        }
+        if rejected > 0 {
+            self.toast(Hit::Plate, t("bar.unsupported"));
+        }
+    }
+
+    pub fn open_settings(&mut self) {
+        log_info!("settings (pending task)");
     }
 
     // ---- interacción ----
@@ -897,8 +1170,8 @@ impl Toolbar {
     fn on_click(&mut self, h: Hit) {
         match h {
             Hit::Cell(i) => self.launch_entry(i),
-            Hit::Add => log_info!("add clicked (pending task)"),
-            Hit::Settings => log_info!("settings clicked (pending task)"),
+            Hit::Add => self.open_edit(None),
+            Hit::Settings => self.open_settings(),
             Hit::ArrowLeft => self.scroll_by(-(self.viewport_w() - Metrics::CELL), SCROLL_ARROW_MS),
             Hit::ArrowRight => self.scroll_by(self.viewport_w() - Metrics::CELL, SCROLL_ARROW_MS),
             _ => {}
@@ -1151,17 +1424,28 @@ impl WindowHandler for Toolbar {
                 Some(LRESULT(0))
             }
             window::WM_THEME_CHANGED | window::WM_ENTRIES_CHANGED => {
-                if self.visible {
-                    self.pal = theme::palette(self.settings.borrow().theme);
-                    self.relayout();
-                    self.load_icons();
-                    let _ = self.build_visuals(None);
-                    self.commit();
-                }
+                self.pal = theme::palette(self.settings.borrow().theme);
+                self.rebuild();
                 Some(LRESULT(0))
             }
             WM_CLOSE => {
                 self.hide();
+                Some(LRESULT(0))
+            }
+            WM_DROPFILES => {
+                let hdrop = HDROP(wparam.0 as *mut c_void);
+                let mut paths = Vec::new();
+                unsafe {
+                    let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, None);
+                    for i in 0..count {
+                        let len = DragQueryFileW(hdrop, i, None) as usize;
+                        let mut buf = vec![0u16; len + 1];
+                        DragQueryFileW(hdrop, i, Some(&mut buf));
+                        paths.push(PathBuf::from(String::from_utf16_lossy(&buf[..len])));
+                    }
+                    DragFinish(hdrop);
+                }
+                self.add_dropped(paths);
                 Some(LRESULT(0))
             }
             _ => None,
