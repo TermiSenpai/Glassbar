@@ -2,4 +2,5 @@
 
 pub mod layout;
 pub mod toolbar;
+pub mod tooltip;
 pub mod window;

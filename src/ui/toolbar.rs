@@ -10,7 +10,9 @@ use crate::model::entries::{Entries, IconSource};
 use crate::model::settings::Settings;
 use crate::theme::{self, Palette};
 use crate::ui::layout::{self, BarLayout, Hit, Metrics, Rect};
-use crate::ui::window::{self, Handler, PopupStyle, Window, WindowCtx, WindowHandler};
+use crate::ui::tooltip::Tooltip;
+use crate::ui::window::{self, Handler, Monitor, PopupStyle, Window, WindowCtx, WindowHandler};
+use std::collections::VecDeque;
 use crate::fsx;
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -39,6 +41,15 @@ pub const SCROLL_ARROW_MS: u32 = 220;
 pub const SLIDE_PX: f32 = 18.0;
 pub const ICON_SLIDE_PX: f32 = 8.0;
 pub const CLOSE_SLIDE_PX: f32 = 10.0;
+pub const DRAG_THRESHOLD_PX: f32 = 4.0;
+pub const VELOCITY_WINDOW_MS: u64 = 100;
+
+struct Drag {
+    start_x: f32,
+    start_offset: f32,
+    moved: bool,
+    samples: VecDeque<(u64, f32)>,
+}
 
 struct Visual {
     visual: IDCompositionVisual2,
@@ -86,6 +97,10 @@ pub struct Toolbar {
     update_dot: bool,
     on_hidden: Box<dyn Fn()>,
     perf_start: Option<Instant>,
+    mon: Option<Monitor>,
+    tooltip: Option<Tooltip>,
+    tooltip_for: Option<Hit>,
+    drag: Option<Drag>,
 }
 
 fn add_child(parent: &IDCompositionVisual2, child: &IDCompositionVisual2, last: &mut Option<IDCompositionVisual2>) -> Result<()> {
@@ -136,6 +151,10 @@ impl Toolbar {
             update_dot: false,
             on_hidden,
             perf_start,
+            mon: None,
+            tooltip: None,
+            tooltip_for: None,
+            drag: None,
         }));
         rc.borrow_mut().self_weak = Rc::downgrade(&rc);
         rc
@@ -217,14 +236,17 @@ impl Toolbar {
         self.hover = Hit::Outside;
         self.pressed = None;
         self.focus = None;
+        self.drag = None;
+        self.hide_tooltip();
         self.relayout();
         let (lx, ly) = layout::window_position(&self.layout, mon.work);
+        self.mon = Some(mon);
         let (wx, wy) = (self.phys(lx) as i32, self.phys(ly) as i32);
         let (ww, wh) = (self.phys(self.layout.window.0) as i32, self.phys(self.layout.window.1) as i32);
         let win = self.win.as_ref().expect("window");
         win.move_to(wx, wy, ww, wh);
         let plate = self.layout.plate;
-        let hdr = backdrop::output_is_hdr(mon.handle);
+        let hdr = backdrop::output_is_hdr(self.mon.as_ref().map(|m| m.handle).unwrap_or_default());
         crate::app::perf_mark("hdr probe");
         let cap = if hdr {
             None
@@ -264,6 +286,8 @@ impl Toolbar {
             return;
         }
         self.visible = false;
+        self.hide_tooltip();
+        self.drag = None;
         let Some(win) = &self.win else { return };
         if self.animate {
             if let (Some(g), Some(d)) = (&self.group, self.dcomp()) {
@@ -624,6 +648,197 @@ impl Toolbar {
         Ok(())
     }
 
+    // ---- tooltip ----
+
+    fn hide_tooltip(&mut self) {
+        if let Some(w) = &self.win {
+            w.kill_timer(window::TIMER_TOOLTIP);
+        }
+        if let Some(t) = self.tooltip.take() {
+            t.hide();
+        }
+        self.tooltip_for = None;
+    }
+
+    fn tooltip_lines(&self, h: Hit) -> Vec<String> {
+        match h {
+            Hit::Cell(i) => {
+                let entries = self.entries.borrow();
+                let Some(e) = entries.entries.get(i) else { return Vec::new() };
+                let mut v = vec![e.name.clone()];
+                if self.missing.get(i).copied().unwrap_or(false) {
+                    v.push(crate::i18n::t("bar.missing").to_string());
+                }
+                v
+            }
+            Hit::Add => vec![crate::i18n::t("bar.add").to_string()],
+            Hit::Settings => vec![crate::i18n::t("bar.settings").to_string()],
+            _ => Vec::new(),
+        }
+    }
+
+    fn rect_for(&self, h: Hit) -> Option<Rect> {
+        match h {
+            Hit::Cell(i) => self.layout.cells.get(i).copied(),
+            Hit::Add => Some(self.layout.add),
+            Hit::Settings => Some(self.layout.settings),
+            _ => None,
+        }
+    }
+
+    fn show_tooltip_for(&mut self, h: Hit) {
+        if self.drag.as_ref().map(|d| d.moved).unwrap_or(false) || self.pressed.is_some() {
+            return;
+        }
+        let lines = self.tooltip_lines(h);
+        let (Some(r), Some(win), Some(mon)) = (self.rect_for(h), &self.win, &self.mon) else { return };
+        if lines.is_empty() {
+            return;
+        }
+        let wr = win.rect();
+        let (cx, cy) = r.center();
+        let anchor_cx = wr.left + self.phys(cx) as i32;
+        let anchor_top = wr.top + self.phys(r.y) as i32;
+        let _ = cy;
+        if let Some(t) = self.tooltip.take() {
+            t.hide();
+        }
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        match Tooltip::show(&self.gfx, &self.pal, &refs, anchor_cx, anchor_top, mon, self.animate) {
+            Ok(t) => {
+                self.tooltip = Some(t);
+                self.tooltip_for = Some(h);
+            }
+            Err(e) => log_warn!("tooltip failed: {e}"),
+        }
+    }
+
+    /// Mensaje breve sobre una celda o el plato, que desaparece solo.
+    pub fn toast(&mut self, h: Hit, text: &str) {
+        let Some(win) = &self.win else { return };
+        let (Some(r), Some(mon)) = (self.rect_for(h).or(Some(self.layout.plate)), &self.mon) else { return };
+        let wr = win.rect();
+        let (cx, _) = r.center();
+        if let Some(t) = self.tooltip.take() {
+            t.hide();
+        }
+        if let Ok(t) = Tooltip::show(&self.gfx, &self.pal, &[text], wr.left + self.phys(cx) as i32, wr.top + self.phys(r.y) as i32, mon, self.animate) {
+            self.tooltip = Some(t);
+            self.tooltip_for = None;
+            win.set_timer(window::TIMER_TOAST, 2500);
+        }
+    }
+
+    // ---- foco y teclado ----
+
+    fn focus_order(&self) -> Vec<Focus> {
+        let n = self.layout.cells.len();
+        let mut v: Vec<Focus> = (0..n).map(Focus::Cell).collect();
+        v.push(Focus::Add);
+        v.push(Focus::Settings);
+        v
+    }
+
+    fn set_focus(&mut self, f: Option<Focus>) {
+        if f == self.focus {
+            return;
+        }
+        let old = self.focus;
+        self.focus = f;
+        if let Some(o) = old {
+            self.repaint_focus(o);
+        }
+        if let Some(n) = f {
+            if let Focus::Cell(i) = n {
+                let target = layout::scroll_to_reveal(&self.layout, i);
+                self.scroll_to(target, 150);
+            }
+            self.repaint_focus(n);
+        }
+        self.commit();
+    }
+
+    fn repaint_focus(&self, f: Focus) {
+        let _ = match f {
+            Focus::Cell(i) => self.paint_cell(i),
+            Focus::Add => self.paint_add_button(),
+            Focus::Settings => self.paint_settings_button(),
+        };
+    }
+
+    fn move_focus(&mut self, delta: i32) {
+        let order = self.focus_order();
+        if order.is_empty() {
+            return;
+        }
+        let idx = match self.focus {
+            Some(f) => order.iter().position(|x| *x == f).map(|p| p as i32).unwrap_or(-1),
+            None => -1,
+        };
+        let next = if idx < 0 {
+            if delta > 0 { 0 } else { order.len() as i32 - 1 }
+        } else {
+            (idx + delta).rem_euclid(order.len() as i32)
+        };
+        self.set_focus(Some(order[next as usize]));
+    }
+
+    fn activate_focus(&mut self) {
+        match self.focus {
+            Some(Focus::Cell(i)) => self.on_click(Hit::Cell(i)),
+            Some(Focus::Add) => self.on_click(Hit::Add),
+            Some(Focus::Settings) => self.on_click(Hit::Settings),
+            None => {}
+        }
+    }
+
+    fn on_key(&mut self, vk: u16) -> bool {
+        match vk {
+            x if x == VK_ESCAPE.0 => {
+                self.hide();
+                true
+            }
+            x if x == VK_LEFT.0 => {
+                self.move_focus(-1);
+                true
+            }
+            x if x == VK_RIGHT.0 => {
+                self.move_focus(1);
+                true
+            }
+            x if x == VK_TAB.0 => {
+                self.move_focus(if window::key_down(VK_SHIFT.0) { -1 } else { 1 });
+                true
+            }
+            x if x == VK_HOME.0 => {
+                self.set_focus(self.focus_order().first().copied());
+                true
+            }
+            x if x == VK_END.0 => {
+                self.set_focus(self.focus_order().last().copied());
+                true
+            }
+            x if x == VK_RETURN.0 || x == VK_SPACE.0 => {
+                self.activate_focus();
+                true
+            }
+            x if x == VK_APPS.0 || (x == VK_F10.0 && window::key_down(VK_SHIFT.0)) => {
+                if let Some(Focus::Cell(i)) = self.focus {
+                    self.open_context_menu(Hit::Cell(i), None);
+                } else {
+                    self.open_context_menu(Hit::Plate, None);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Menú contextual; `at` en coordenadas físicas de pantalla, o bajo la celda si es `None`.
+    pub fn open_context_menu(&mut self, h: Hit, at: Option<(i32, i32)>) {
+        log_info!("context menu for {h:?} at {at:?} (pending task)");
+    }
+
     // ---- interacción ----
 
     fn hit_at(&self, lparam: LPARAM) -> Hit {
@@ -644,6 +859,13 @@ impl Toolbar {
         if matches!(h, Hit::Cell(_) | Hit::Add | Hit::Settings) {
             self.repaint_hit(h);
             self.set_hover_anim(h, 1.06, 1.0);
+            if self.tooltip.is_some() && self.tooltip_for.is_some() {
+                self.show_tooltip_for(h);
+            } else if let Some(w) = &self.win {
+                w.set_timer(window::TIMER_TOOLTIP, crate::ui::tooltip::SHOW_MS);
+            }
+        } else {
+            self.hide_tooltip();
         }
         self.commit();
     }
@@ -746,6 +968,50 @@ impl Toolbar {
         }
     }
 
+    fn on_drag_move(&mut self, x: f32) {
+        let Some(s) = self.layout.scroll.clone() else { return };
+        let Some(mut d) = self.drag.take() else { return };
+        let dx = x - d.start_x;
+        if !d.moved && dx.abs() < DRAG_THRESHOLD_PX {
+            self.drag = Some(d);
+            return;
+        }
+        if !d.moved {
+            d.moved = true;
+            let pressed = self.pressed;
+            self.pressed = None;
+            if let Some(p) = pressed {
+                self.repaint_hit(p);
+            }
+            let hov = self.hover;
+            self.hover = Hit::Outside;
+            if matches!(hov, Hit::Cell(_)) {
+                self.repaint_hit(hov);
+                self.set_hover_anim(hov, 1.0, 0.0);
+            }
+            self.hide_tooltip();
+        }
+        let now = window::now_ms();
+        d.samples.push_back((now, x));
+        while d.samples.len() > 2 && now - d.samples[0].0 > VELOCITY_WINDOW_MS {
+            d.samples.pop_front();
+        }
+        let target = layout::clamp_scroll(d.start_offset - dx, s.max_offset);
+        self.drag = Some(d);
+        self.scroll_to(target, 0);
+    }
+
+    fn on_drag_end(&mut self, d: Drag, x: f32) {
+        let Some(s) = self.layout.scroll.clone() else { return };
+        let now = window::now_ms();
+        let (t0, x0) = d.samples.front().copied().unwrap_or((now, x));
+        let dt = (now.saturating_sub(t0)).max(1) as f32 / 1000.0;
+        let velocity = (x - x0) / dt;
+        let (target, ms) = layout::inertia_target(self.scroll_offset, velocity, s.max_offset);
+        self.scroll_to(target, ms);
+        self.pressed = None;
+    }
+
     fn on_deactivate(&mut self, other: HWND) {
         if self.visible && !window::is_ours(other) {
             self.hide();
@@ -773,6 +1039,11 @@ impl WindowHandler for Toolbar {
     fn on_message(&mut self, ctx: &WindowCtx, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         match msg {
             WM_MOUSEMOVE => {
+                if self.drag.is_some() {
+                    let (x, _) = window::lparam_xy(lparam);
+                    self.on_drag_move(x as f32 / self.scale);
+                    return Some(LRESULT(0));
+                }
                 let h = self.hit_at(lparam);
                 self.set_hover(h);
                 window::invalidate_tracking(ctx.hwnd);
@@ -784,20 +1055,43 @@ impl WindowHandler for Toolbar {
             }
             WM_LBUTTONDOWN => {
                 let h = self.hit_at(lparam);
+                self.hide_tooltip();
                 if matches!(h, Hit::Cell(_) | Hit::Add | Hit::Settings | Hit::ArrowLeft | Hit::ArrowRight) {
                     self.set_pressed(Some(h));
-                    window::capture_mouse(ctx.hwnd);
                 }
+                let (x, y) = window::lparam_xy(lparam);
+                let in_viewport = self.layout.scroll.as_ref().map(|s| s.viewport.contains(x as f32 / self.scale, y as f32 / self.scale)).unwrap_or(false);
+                if in_viewport {
+                    let mut samples = VecDeque::new();
+                    samples.push_back((window::now_ms(), x as f32 / self.scale));
+                    self.drag = Some(Drag { start_x: x as f32 / self.scale, start_offset: self.scroll_offset, moved: false, samples });
+                }
+                window::capture_mouse(ctx.hwnd);
                 Some(LRESULT(0))
             }
             WM_LBUTTONUP => {
                 window::release_mouse();
+                let (x, _) = window::lparam_xy(lparam);
+                if let Some(d) = self.drag.take() {
+                    if d.moved {
+                        self.on_drag_end(d, x as f32 / self.scale);
+                        return Some(LRESULT(0));
+                    }
+                }
                 let h = self.hit_at(lparam);
                 let pressed = self.pressed;
                 self.set_pressed(None);
                 if pressed == Some(h) {
                     self.on_click(h);
                 }
+                Some(LRESULT(0))
+            }
+            WM_RBUTTONUP => {
+                let h = self.hit_at(lparam);
+                let (x, y) = window::lparam_xy(lparam);
+                let (sx, sy) = window::client_to_screen(ctx.hwnd, x, y);
+                self.hide_tooltip();
+                self.open_context_menu(h, Some((sx, sy)));
                 Some(LRESULT(0))
             }
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
@@ -807,11 +1101,7 @@ impl WindowHandler for Toolbar {
                 Some(LRESULT(0))
             }
             WM_KEYDOWN => {
-                if wparam.0 as u16 == VK_ESCAPE.0 {
-                    self.hide();
-                    return Some(LRESULT(0));
-                }
-                None
+                if self.on_key(wparam.0 as u16) { Some(LRESULT(0)) } else { None }
             }
             WM_ACTIVATE => {
                 if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE {
@@ -829,13 +1119,32 @@ impl WindowHandler for Toolbar {
                 window::set_arrow_cursor();
                 Some(LRESULT(1))
             }
-            WM_TIMER => {
-                if wparam.0 == window::TIMER_HIDE {
+            WM_TIMER => match wparam.0 {
+                window::TIMER_HIDE => {
                     self.finish_hide();
-                    return Some(LRESULT(0));
+                    Some(LRESULT(0))
                 }
-                None
-            }
+                window::TIMER_TOOLTIP => {
+                    if let Some(w) = &self.win {
+                        w.kill_timer(window::TIMER_TOOLTIP);
+                    }
+                    let h = self.hover;
+                    if matches!(h, Hit::Cell(_) | Hit::Add | Hit::Settings) && self.visible {
+                        self.show_tooltip_for(h);
+                    }
+                    Some(LRESULT(0))
+                }
+                window::TIMER_TOAST => {
+                    if let Some(w) = &self.win {
+                        w.kill_timer(window::TIMER_TOAST);
+                    }
+                    if self.tooltip_for.is_none() {
+                        self.hide_tooltip();
+                    }
+                    Some(LRESULT(0))
+                }
+                _ => None,
+            },
             window::WM_ICON_READY => {
                 let r = unsafe { Box::from_raw(lparam.0 as *mut IconResult) };
                 self.on_icon_ready(r);
