@@ -57,7 +57,8 @@ En orden:
 | Gestión | Sin ventana de gestión. Menú contextual, botón + y arrastrar archivos. |
 | Reordenar | Mover a la izquierda o a la derecha desde el menú contextual. |
 | Desbordamiento | Carrusel horizontal con arrastre, inercia, rueda, bordes desvanecidos y flechas. Añadir y ajustes fijos a la derecha. |
-| Cristal de la barra | Acrylic por instantánea: captura de lo que hay detrás, desenfoque en GPU una vez por apertura. Permite animar el plato. Igual en Windows 10 y 11. |
+| Cristal de la barra | Acrylic por instantánea: captura de lo que hay detrás, desenfoque con Direct2D una vez por apertura. Permite animar el plato. Igual en Windows 10 y 11. |
+| Dispositivo de dibujo | Direct3D 11 WARP, siempre. Crear el dispositivo por hardware carga el driver de la GPU y tarda entre 350 ms y 2,6 s por proceso en la máquina de referencia; WARP tarda 28 ms. La composición y las animaciones las ejecuta DWM en la GPU en ambos casos. Medido en `docs/perf.md`. |
 | Cristal de ventanas secundarias | Mica del sistema cuando exista; sólido si no. |
 | Tema | Según el sistema, con ajuste para forzar claro u oscuro. Color de acento de Windows. |
 | Celda | 48 px con icono de 34 px. |
@@ -446,11 +447,12 @@ Presupuestos, medidos en la máquina del usuario y anotados en `docs/perf.md` en
 | Memoria privada en residente, barra oculta | menos de 15 MB |
 | CPU en residente, barra oculta | sin actividad: sin temporizadores ni sondeos |
 | Tamaño del exe | menos de 2 MB |
-| Captura y desenfoque del fondo | menos de 5 ms |
+| Captura y desenfoque del fondo | menos de 15 ms a 100 % de escala |
 
 Cómo se consigue:
 
 - Sin bitmap de redirección: el contenido va directo al compositor.
+- Dispositivo WARP: evita cargar el driver de la GPU en cada arranque. El dibujo de superficies es mínimo y DWM compone y anima en la GPU.
 - Una lectura de `icons.cache` sustituye a decodificar cada imagen.
 - Nada de WinRT. COM se inicializa solo para Direct2D, el shell y los selectores de archivos.
 - Las ventanas de ajustes y diálogos se crean la primera vez que se abren.
