@@ -157,6 +157,7 @@ pub fn encode_png(wic: &IWICImagingFactory, px: u32, bgra_premul: &[u8], dest: &
 }
 
 pub struct Job {
+    pub generation: u32,
     pub index: usize,
     pub id: String,
     pub source: PathBuf,
@@ -165,6 +166,7 @@ pub struct Job {
 }
 
 pub struct IconResult {
+    pub generation: u32,
     pub index: usize,
     pub id: String,
     pub px: u32,
@@ -188,7 +190,7 @@ pub fn spawn_worker(jobs: Vec<Job>, hwnd_raw: isize) {
                     (IconSource::File, _) => extract_file_icon(&job.source, job.px),
                     _ => None,
                 };
-                let r = Box::new(IconResult { index: job.index, id: job.id, px: job.px, fingerprint, bgra });
+                let r = Box::new(IconResult { generation: job.generation, index: job.index, id: job.id, px: job.px, fingerprint, bgra });
                 crate::ui::window::post(hwnd_raw, crate::ui::window::WM_ICON_READY, job.index, Box::into_raw(r) as isize);
             }
             unsafe { CoUninitialize() };

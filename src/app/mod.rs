@@ -1,0 +1,88 @@
+//! Orquestación: carga de datos, instancia, barra y bucle de mensajes.
+
+use crate::gfx::Gfx;
+use crate::icons::cache::IconCache;
+use crate::model::LoadOutcome;
+use crate::model::entries::Entries;
+use crate::model::legacy_import;
+use crate::model::settings::Settings;
+use crate::ui::toolbar::Toolbar;
+use crate::ui::window;
+use crate::{fsx, i18n};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Instant;
+
+pub fn load_settings() -> Settings {
+    let path = fsx::settings_path();
+    match Settings::load(&path) {
+        LoadOutcome::Loaded(s) => s,
+        LoadOutcome::Missing => Settings::default(),
+        LoadOutcome::Corrupt(e) => {
+            log_warn!("settings.json corrupt ({e}); quarantined");
+            let _ = fsx::quarantine_corrupt(&path);
+            Settings::default()
+        }
+    }
+}
+
+pub fn load_entries() -> Entries {
+    let path = fsx::entries_path();
+    let legacy = fsx::legacy_dir();
+    let import = |why: &str| -> Option<Entries> {
+        if !legacy_import::should_import(&path, &legacy) {
+            return None;
+        }
+        match legacy_import::run(&legacy, &fsx::icons_dir()) {
+            Ok(es) => {
+                log_info!("imported {} entries from BatLauncher ({why})", es.entries.len());
+                if let Err(e) = es.save(&path) {
+                    log_warn!("entries.json save failed after import: {e}");
+                }
+                Some(es)
+            }
+            Err(e) => {
+                log_warn!("legacy import failed: {e}");
+                None
+            }
+        }
+    };
+    match Entries::load(&path) {
+        LoadOutcome::Loaded(es) => es,
+        LoadOutcome::Missing => import("first run").unwrap_or_default(),
+        LoadOutcome::Corrupt(e) => {
+            log_warn!("entries.json corrupt ({e}); quarantined");
+            let _ = fsx::quarantine_corrupt(&path);
+            import("after corrupt file").unwrap_or_default()
+        }
+    }
+}
+
+pub fn run(args: Vec<String>) -> i32 {
+    let start = Instant::now();
+    crate::log::init();
+    crate::gfx::device::co_init();
+    let perf = args.iter().any(|a| a == "--perf");
+
+    let settings = load_settings();
+    i18n::set_lang(settings.effective_language());
+    let entries = load_entries();
+    fsx::clear_dir(&fsx::update_dir());
+
+    let gfx = match Gfx::create() {
+        Ok(g) => Rc::new(g),
+        Err(e) => {
+            log_error!("graphics init failed: {e}");
+            return 1;
+        }
+    };
+    let cache = IconCache::load(&fsx::cache_path());
+    let settings = Rc::new(RefCell::new(settings));
+    let entries = Rc::new(RefCell::new(entries));
+
+    let bar = Toolbar::new(gfx, entries, settings, cache, Box::new(window::post_quit), if perf { Some(start) } else { None });
+    bar.borrow_mut().show();
+    let code = window::run_message_loop();
+    log_info!("exit {code}");
+    code
+}

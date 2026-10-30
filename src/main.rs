@@ -2,6 +2,7 @@
 
 #[macro_use]
 mod log;
+mod app;
 mod fsx;
 mod gfx;
 mod i18n;
@@ -13,5 +14,6 @@ mod ui;
 mod update;
 
 fn main() {
-    std::process::exit(0);
+    let code = app::run(std::env::args().collect());
+    std::process::exit(code);
 }
