@@ -6,6 +6,7 @@ mod fsx;
 mod gfx;
 mod i18n;
 mod icons;
+mod launch;
 mod model;
 mod theme;
 mod ui;
