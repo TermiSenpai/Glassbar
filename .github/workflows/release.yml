@@ -1,0 +1,30 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check tag matches Cargo version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match Cargo version $v" }
+      - run: cargo test --release
+      - run: cargo build --release
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash target/release/Glassbar.exe -Algorithm SHA256).Hash.ToLower()
+          "$h *Glassbar.exe" | Out-File -Encoding ascii SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/release/Glassbar.exe
+            SHA256SUMS
+          generate_release_notes: true
