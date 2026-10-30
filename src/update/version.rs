@@ -194,7 +194,7 @@ mod tests {
         assert!(Version::parse("1.2").is_none() && Version::parse("1.2.3-beta").is_none());
         assert!(Version(1, 10, 0) > Version(1, 9, 9));
         assert_eq!(Version(1, 2, 3).to_string(), "1.2.3");
-        assert_eq!(Version::current(), Version(2, 0, 1));
+        assert_eq!(Version::current(), Version(2, 0, 2));
     }
 
     #[test]

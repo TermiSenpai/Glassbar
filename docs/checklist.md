@@ -29,7 +29,7 @@ Se pasa con `target\release\Glassbar.exe` antes de cada release. Marcado el esta
 - [x] Botón + abre el diálogo de nueva entrada; la barra se oculta y el proceso sigue vivo hasta cerrarlo.
 - [ ] Guardar una entrada nueva con icono personalizado desde una imagen y desde un exe. (pendiente de pasar a mano)
 - [ ] Arrastrar archivos admitidos y no admitidos sobre la barra. (pendiente de pasar a mano)
-- [ ] Quitar con confirmación borra el icono copiado. (pendiente de pasar a mano)
+- [x] Quitar abre un popover de cristal sobre el icono; Enter confirma, quita la entrada y reconstruye la barra. (verificado con datos aislados)
 
 ## Ajustes
 

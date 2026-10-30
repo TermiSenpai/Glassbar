@@ -108,6 +108,8 @@ pub struct Toolbar {
     tooltip: Option<Tooltip>,
     tooltip_for: Option<Hit>,
     drag: Option<Drag>,
+    /// Un popover propio está abierto: sin tooltips hasta que se cierre.
+    popover_open: bool,
 }
 
 fn add_child(parent: &IDCompositionVisual2, child: &IDCompositionVisual2, last: &mut Option<IDCompositionVisual2>) -> Result<()> {
@@ -162,6 +164,7 @@ impl Toolbar {
             tooltip: None,
             tooltip_for: None,
             drag: None,
+            popover_open: false,
         }));
         rc.borrow_mut().self_weak = Rc::downgrade(&rc);
         rc
@@ -695,7 +698,7 @@ impl Toolbar {
     }
 
     fn show_tooltip_for(&mut self, h: Hit) {
-        if self.drag.as_ref().map(|d| d.moved).unwrap_or(false) || self.pressed.is_some() {
+        if self.drag.as_ref().map(|d| d.moved).unwrap_or(false) || self.pressed.is_some() || self.popover_open {
             return;
         }
         let lines = self.tooltip_lines(h);
@@ -1050,12 +1053,21 @@ impl Toolbar {
     }
 
     fn confirm_remove(&mut self, i: usize) {
+        use crate::ui::popover::{Popover, PopoverButton};
         let Some((id, name)) = self.entries.borrow().entries.get(i).map(|e| (e.id.clone(), e.name.clone())) else { return };
+        self.hide_tooltip();
+        let (Some(r), Some(win), Some(mon)) = (self.rect_for(Hit::Cell(i)), &self.win, &self.mon) else { return };
+        let wr = win.rect();
+        let (cx, _) = r.center();
+        let anchor_cx = wr.left + self.phys(cx) as i32;
+        let anchor_top = wr.top + self.phys(r.y) as i32;
+        let anchor_bottom = wr.top + self.phys(r.bottom()) as i32;
         let weak = self.self_weak.clone();
-        let on_done: Box<dyn FnOnce(bool)> = Box::new(move |ok| {
+        let on_pick: crate::ui::popover::PickFn = Box::new(move |pick| {
             if let Some(rc) = weak.upgrade() {
                 if let Ok(mut tb) = rc.try_borrow_mut() {
-                    if ok {
+                    tb.popover_open = false;
+                    if pick == Some(1) {
                         tb.remove_entry(&id);
                     }
                     tb.refocus();
@@ -1063,8 +1075,13 @@ impl Toolbar {
             }
         });
         let text = tf("dialog.remove_text", &[&name]);
-        if let Err(e) = crate::ui::confirm::open(&self.gfx, &self.pal, t("dialog.remove_title"), &text, t("dialog.remove_confirm"), on_done) {
-            log_warn!("confirm dialog failed: {e}");
+        let buttons = vec![
+            PopoverButton { label: t("dialog.cancel").to_string(), accent: false },
+            PopoverButton { label: t("dialog.remove_confirm").to_string(), accent: true },
+        ];
+        match Popover::open(&self.gfx, &self.pal, &text, buttons, anchor_cx, anchor_top, anchor_bottom, mon, self.animate, on_pick) {
+            Ok(()) => self.popover_open = true,
+            Err(e) => log_warn!("remove popover failed: {e}"),
         }
     }
 

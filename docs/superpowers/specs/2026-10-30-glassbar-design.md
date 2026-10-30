@@ -178,7 +178,7 @@ Ventana de 440 px de ancho, título "Nueva entrada" o "Editar entrada", botón d
 - Guardar y Cancelar. Enter guarda, Escape cancela. Guardar deshabilitado si el nombre o el archivo están vacíos.
 - Las imágenes elegidas se copian a `icons\<id>.<ext>`. Los iconos extraídos de un exe se guardan como `icons\<id>.png`. Al cambiar o quitar, el archivo anterior se borra.
 
-Confirmación de quitar: ventana de 360 px con el nombre de la entrada, botones "Quitar" y "Cancelar". Quitar borra su icono copiado.
+Confirmación de quitar: popover de cristal anclado sobre la celda, con el mismo plato y animación que el menú, el texto con el nombre de la entrada y los botones "Cancelar" y "Quitar". Enter confirma, Escape o clic fuera cancela. La barra sigue visible. Quitar borra su icono copiado.
 
 ### 5.9 Ventana de ajustes
 
