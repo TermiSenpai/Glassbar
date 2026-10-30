@@ -10,7 +10,7 @@
         Background="Transparent"
         ResizeMode="NoResize"
         Topmost="True"
-        ShowInTaskbar="True">
+        ShowInTaskbar="False">
 
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVis"/>

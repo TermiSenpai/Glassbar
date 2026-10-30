@@ -58,7 +58,8 @@ public partial class ToolbarWindow : Window
     private void OnDeactivated(object? sender, EventArgs e)
     {
         if (_isShowingDialog) return;
-        WindowState = WindowState.Minimized;
+        // Hide to tray instead of just minimizing
+        ((App)Application.Current).HideToolbar();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -85,7 +86,7 @@ public partial class ToolbarWindow : Window
         }
     }
 
-    private void PositionAboveTaskbar()
+    public void PositionAboveTaskbar()
     {
         UpdateLayout();
 
@@ -175,7 +176,8 @@ public partial class ToolbarWindow : Window
                     UseShellExecute = true
                 };
             Process.Start(psi);
-            Application.Current.Shutdown();
+            // Hide to tray after launching script (stay running in background)
+            ((App)Application.Current).HideToolbar();
         }
         catch (Exception ex)
         {
@@ -217,6 +219,7 @@ public partial class ToolbarWindow : Window
     private void Close_Click(object sender, RoutedEventArgs e)
     {
         _managementWindow?.Close();
-        Close();
+        // Hide to tray instead of closing
+        ((App)Application.Current).HideToolbar();
     }
 }

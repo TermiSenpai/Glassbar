@@ -42,3 +42,6 @@ Desktop.ini
 *.bak
 *.swp
 i
+
+## Brainstorm companion
+.superpowers/

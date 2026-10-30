@@ -13,6 +13,7 @@ public partial class EditDialog : Window
     private readonly BatEntry _entry;
     private string? _selectedIconPath;
     private bool _iconRemoved;
+    private bool _isAutoExtractedIcon;
 
     public BatEntry? Result { get; private set; }
 
@@ -30,6 +31,12 @@ public partial class EditDialog : Window
         {
             LoadIconPreview(entry.IconPath);
             RemoveIconBtn.Visibility = Visibility.Visible;
+        }
+        else if (!string.IsNullOrEmpty(entry.FilePath) &&
+                 Path.GetExtension(entry.FilePath).Equals(".exe", StringComparison.OrdinalIgnoreCase) &&
+                 File.Exists(entry.FilePath))
+        {
+            TryExtractExeIcon(entry.FilePath);
         }
 
         NameBox.Focus();
@@ -55,6 +62,11 @@ public partial class EditDialog : Window
             FilePathBox.Text = dlg.FileName;
             if (string.IsNullOrWhiteSpace(NameBox.Text))
                 NameBox.Text = Path.GetFileNameWithoutExtension(dlg.FileName);
+
+            // Auto-extract icon for EXE files when no custom icon is set
+            var ext = Path.GetExtension(dlg.FileName).ToLowerInvariant();
+            if (ext == ".exe" && (_selectedIconPath == null || _isAutoExtractedIcon))
+                TryExtractExeIcon(dlg.FileName);
         }
     }
 
@@ -71,6 +83,7 @@ public partial class EditDialog : Window
         {
             _selectedIconPath = dlg.FileName;
             _iconRemoved = false;
+            _isAutoExtractedIcon = false;
             LoadIconPreview(dlg.FileName);
             RemoveIconBtn.Visibility = Visibility.Visible;
         }
@@ -80,8 +93,22 @@ public partial class EditDialog : Window
     {
         _selectedIconPath = null;
         _iconRemoved = true;
+        _isAutoExtractedIcon = false;
         IconPreview.Source = null;
         RemoveIconBtn.Visibility = Visibility.Collapsed;
+    }
+
+    private void TryExtractExeIcon(string exePath)
+    {
+        var extractedPath = DataService.ExtractExeIcon(exePath, _entry.Id);
+        if (extractedPath != null)
+        {
+            _selectedIconPath = extractedPath;
+            _isAutoExtractedIcon = true;
+            _iconRemoved = false;
+            LoadIconPreview(extractedPath);
+            RemoveIconBtn.Visibility = Visibility.Visible;
+        }
     }
 
     private void LoadIconPreview(string path)
