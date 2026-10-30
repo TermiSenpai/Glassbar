@@ -3,9 +3,11 @@
 #[macro_use]
 mod log;
 mod fsx;
+mod gfx;
 mod i18n;
 mod icons;
 mod model;
+mod theme;
 mod ui;
 mod update;
 
