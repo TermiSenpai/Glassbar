@@ -1177,8 +1177,14 @@ impl Toolbar {
     fn on_click(&mut self, h: Hit) {
         match h {
             Hit::Cell(i) => self.launch_entry(i),
-            Hit::Add => self.open_edit(None),
-            Hit::Settings => self.open_settings(),
+            Hit::Add => {
+                log_info!("click: add");
+                self.open_edit(None)
+            }
+            Hit::Settings => {
+                log_info!("click: settings");
+                self.open_settings()
+            }
             Hit::ArrowLeft => self.scroll_by(-(self.viewport_w() - Metrics::CELL), SCROLL_ARROW_MS),
             Hit::ArrowRight => self.scroll_by(self.viewport_w() - Metrics::CELL, SCROLL_ARROW_MS),
             _ => {}
@@ -1203,7 +1209,10 @@ impl Toolbar {
                 log_info!("launched {}", path.display());
                 self.hide();
             }
-            Err(msg) => log_warn!("launch failed for {}: {msg}", path.display()),
+            Err(msg) => {
+                log_warn!("launch failed for {}: {msg}", path.display());
+                self.toast(Hit::Cell(i), &tf("bar.launch_error", &[&msg]));
+            }
         }
     }
 

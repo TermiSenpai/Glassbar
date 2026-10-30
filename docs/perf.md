@@ -43,6 +43,6 @@ Fases de un arranque representativo (65 ms):
 
 Lo que queda por encima de los 50 ms objetivo es la carga de `d3d11.dll`, `d3d10warp.dll`, `d2d1.dll`, `dwrite.dll`, `windowscodecs.dll` y `dcomp.dll`, que no depende de la app. Se acepta: por debajo de 100 ms se percibe como instantáneo.
 
-| Fecha | segunda instancia | memoria privada visible | exe |
-|---|---|---|---|
-| (pendiente) | | 23,7 MB | 567 KB |
+| Fecha | segunda instancia | memoria privada, barra visible | memoria privada, residente oculto | CPU residente en reposo | exe |
+|---|---|---|---|---|---|
+| 2026-10-30 | 3,2 ms hasta enviar "alternar"; 143 ms de proceso completo medidos desde la shell | 23,7 MB | 10,8 MB | 0 ms en 5 s | 580 KB |

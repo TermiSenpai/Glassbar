@@ -1,141 +1,84 @@
-<div align="center">
+# Glassbar
 
-# BatLauncher
+A glass second toolbar for Windows. Pin it to the taskbar, click it, and your scripts and programs appear on a translucent bar above the taskbar. Click one to launch it; the bar gets out of the way.
 
-A fast, modern launcher for `.bat` and `.cmd` scripts on Windows 10/11.
+Native Rust on Win32, DirectComposition and Direct2D. A single 600 KB executable with no runtime to install. Nothing runs in the background unless you ask for it.
 
-Pin it to your taskbar, click it, and run your scripts instantly.
+[Versión en español](README.es.md)
 
-![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4?style=flat-square&logo=dotnet)
-![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4?style=flat-square&logo=windows)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-
-</div>
-
----
-
-## Preview
-
-### Floating Toolbar
-
-Appears above the taskbar when you launch the app. Click any icon to run the script.
-
-<div align="center">
-
-![Toolbar](assets/toolbar-preview.svg)
-
-</div>
-
-### Management Window
-
-Full management with search, add, edit, and delete. Open it from the gear icon.
-
-<div align="center">
-
-![Management Window](assets/management-preview.svg)
-
-</div>
-
-### Add / Edit Dialog
-
-Set a custom display name, pick your `.bat`/`.cmd` file, and optionally add a custom icon.
-
-<div align="center">
-
-![Edit Dialog](assets/edit-dialog-preview.svg)
-
-</div>
-
----
-
-## Features
-
-- **Floating toolbar** — horizontal bar above the taskbar with script icons
-- **One-click launch** — click an icon to run the script instantly
-- **Custom names** — display names without renaming the original file
-- **Custom icons** — PNG, JPG, ICO, BMP — copied to AppData so originals can be deleted
-- **Search** — filter scripts by name or path in the management window
-- **Persistent data** — stored in `%LOCALAPPDATA%\BatLauncher\data.json`
-- **Taskbar pinnable** — standard `.exe`, pin it to your Windows taskbar
-- **Dark theme** — Catppuccin Mocha color scheme
-- **Fast startup** — ReadyToRun (R2R) precompilation, deferred data loading (~800ms cold start)
-- **Lightweight** — ~258 KB executable (framework-dependent)
-
----
-
-## Requirements
-
-- Windows 10 or 11 (x64)
-- [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0)
-
----
+![Glassbar above the Windows taskbar](docs/images/bar.png)
 
 ## Install
 
-### From Release
+1. Download `Glassbar.exe` from the [latest release](https://github.com/TermiSenpai/Glassbar/releases/latest).
+2. Put it anywhere you like.
+3. Right-click it and choose **Pin to taskbar**.
 
-1. Download `BatLauncher.exe` from [Releases](../../releases)
-2. Place it wherever you want
-3. Right-click → **Pin to taskbar**
-4. Done
+Windows 11 is the target. Windows 10 (1903 or later) works with a solid background in the settings window instead of Mica.
 
-### Build from source
+If you used BatLauncher before, your entries and icons are imported automatically the first time Glassbar starts. The old folder is left untouched.
 
-```bash
-git clone https://github.com/YOUR_USER/BatLauncher.git
-cd BatLauncher/BatLauncher
-dotnet publish -c Release -o ../publish
-```
-
-The executable will be at `publish/BatLauncher.exe`.
-
----
-
-## Usage
+## Use
 
 | Action | How |
 |---|---|
-| **Run a script** | Click its icon on the toolbar, or double-click in the management window |
-| **Add a script** | Click `+` on the toolbar or management window |
-| **Edit a script** | Select it in the management window → click the edit button |
-| **Delete a script** | Select it → click the delete button → confirm |
-| **Open management** | Click the gear icon on the toolbar |
-| **Search** | Type in the search box in the management window |
-| **Move toolbar** | Drag it to any position on any screen |
+| Open the bar | Click the pinned icon. |
+| Launch an entry | Click its icon, or focus it with the arrow keys and press Enter. |
+| Close the bar | Press Escape, click anywhere else, or launch an entry. |
+| Add an entry | Click **+**, or drop `.bat`, `.cmd`, `.exe` or `.lnk` files onto the bar. |
+| Edit, reorder, remove | Right-click an icon. |
+| Many entries | The bar caps at 80 % of the screen and becomes a carousel: drag it, use the wheel, or the arrows at both ends. |
+| Settings | Click the gear. |
 
----
+![Context menu](docs/images/menu.png)
 
-## Data Storage
+![Edit entry](docs/images/edit.png)
 
-All data is stored in:
+### Keep it in the background
+
+Off by default. Turn on **Keep in the background** in Settings to keep Glassbar in the system tray so the bar opens instantly, and to enable:
+
+- **Start with Windows**
+- **Global keyboard shortcut**, for example Win + Alt + Space
+
+![Settings](docs/images/settings.png)
+
+### Updates
+
+Glassbar checks GitHub Releases once a day in the background (you can turn it off) and shows a dot on the gear when a new version exists. Nothing is replaced until you press **Update**; the download is verified against the published `SHA256SUMS` before the executable is swapped.
+
+## Data
+
+Everything lives in `%LOCALAPPDATA%\Glassbar`:
 
 ```
-%LOCALAPPDATA%\BatLauncher\
-├── data.json          # Script entries
-└── icons\             # Copied icon images
+entries.json     your entries and their order
+settings.json    settings
+icons\           copied custom icons
+icons.cache      pre-scaled icon bitmaps
+log.txt          log (rotated at 1 MB)
 ```
 
-Custom icons are **copied** into the `icons` folder, so you can safely delete the originals.
+The only registry value Glassbar ever writes is `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Glassbar`, and only while **Start with Windows** is on.
 
----
+## Build
 
-## Architecture
+Requires a stable Rust toolchain and the Windows SDK (for the resource compiler).
 
 ```
-BatLauncher/
-├── Models/            # BatEntry, AppData
-├── ViewModels/        # MVVM — MainViewModel, BaseViewModel, RelayCommand
-├── Views/             # ToolbarWindow, EditDialog
-├── Services/          # DataService (JSON persistence)
-├── Converters/        # WPF value converters
-├── Resources/         # Theme.xaml (Catppuccin Mocha), app.ico
-├── MainWindow.xaml    # Management window
-└── App.xaml           # Application entry point
+cargo build --release
 ```
 
-Built with **WPF** on **.NET 9**, no external dependencies.
+The executable is `target\release\Glassbar.exe`. `cargo test` runs the unit tests. Start the app with `--perf` to log the startup phases to `log.txt`; measurements for the reference machine are in [docs/perf.md](docs/perf.md).
 
----
+## How it works
+
+- The bar is a popup window without a redirection bitmap; everything on it is a DirectComposition visual drawn once with Direct2D. Animations run in the Windows compositor, so the app does no per-frame work.
+- The glass is a snapshot: what is behind the bar is captured and blurred once per opening, which lets the whole plate fade and slide. Settings use the system Mica backdrop where available.
+- Drawing uses the WARP software device on purpose: creating a hardware device loads the GPU driver and costs hundreds of milliseconds per process, while WARP costs about 30 ms. Composition still happens on the GPU.
+- Icons are cached as pre-scaled bitmaps so a cold start has nothing to decode.
+
+Design notes live in `docs/superpowers/`. The previous WPF application is kept on the `legacy-wpf` branch.
 
 ## License
 

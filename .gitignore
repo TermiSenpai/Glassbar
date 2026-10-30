@@ -1,40 +1,17 @@
 ## Rust
 target/
+dist/
 
 ## Brainstorm companion
 .superpowers/
 
-## .NET / Visual Studio
-bin/
-obj/
-publish/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-*.pdb
-
-## Build results
-[Dd]ebug/
-[Rr]elease/
-x64/
-x86/
-[Bb]uild/
-bld/
-
-## NuGet
-**/packages/
-*.nupkg
-**/project.assets.json
-**/project.nuget.cache
+## Claude
+.claude/
 
 ## IDE
 .vs/
 .vscode/
 *.code-workspace
-
-## Claude
-.claude/
 
 ## OS
 Thumbs.db
@@ -47,4 +24,3 @@ Desktop.ini
 *.tmp
 *.bak
 *.swp
-i
