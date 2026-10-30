@@ -169,6 +169,10 @@ impl Toolbar {
         }
     }
 
+    fn dcomp(&self) -> Option<IDCompositionDesktopDevice> {
+        self.gfx.dcomp().ok().cloned()
+    }
+
     // ---- ventana ----
 
     fn create_window(&mut self) -> Result<()> {
@@ -176,7 +180,7 @@ impl Toolbar {
             w.destroy();
         }
         let handler: Handler = self.self_weak.upgrade().expect("toolbar alive");
-        let win = Window::create(&self.gfx, "Glassbar.Bar", PopupStyle::BAR, 10, 10, handler)?;
+        let win = Window::create_hwnd("Glassbar.Bar", PopupStyle::BAR, 10, 10, handler)?;
         unsafe { DragAcceptFiles(win.hwnd, true) };
         self.win = Some(win);
         Ok(())
@@ -199,6 +203,7 @@ impl Toolbar {
 
     fn show_inner(&mut self) -> Result<()> {
         let mon = window::cursor_monitor();
+        crate::app::perf_mark("monitor");
         let scale_changed = (mon.scale - self.scale).abs() > 0.001;
         self.scale = mon.scale;
         self.work_w = mon.work.w;
@@ -208,6 +213,7 @@ impl Toolbar {
         if self.win.is_none() || scale_changed {
             self.create_window()?;
         }
+        crate::app::perf_mark("window created");
         self.hover = Hit::Outside;
         self.pressed = None;
         self.focus = None;
@@ -218,21 +224,38 @@ impl Toolbar {
         let win = self.win.as_ref().expect("window");
         win.move_to(wx, wy, ww, wh);
         let plate = self.layout.plate;
-        let cap = if backdrop::output_is_hdr(mon.handle) {
+        let hdr = backdrop::output_is_hdr(mon.handle);
+        crate::app::perf_mark("hdr probe");
+        let cap = if hdr {
             None
         } else {
-            backdrop::capture_screen(wx + self.phys(plate.x) as i32, wy + self.phys(plate.y) as i32, self.phys(plate.w) as u32, self.phys(plate.h) as u32)
+            backdrop::capture_screen_div(wx + self.phys(plate.x) as i32, wy + self.phys(plate.y) as i32, self.phys(plate.w) as u32, self.phys(plate.h) as u32, 2)
         };
+        crate::app::perf_mark("capture");
+        self.gfx.dcomp()?;
+        crate::app::perf_mark("gfx ready");
+        if let Some(w) = self.win.as_mut() {
+            w.attach(&self.gfx)?;
+        }
+        crate::app::perf_mark("composition attached");
         self.load_icons();
+        crate::app::perf_mark("icons loaded");
         self.build_visuals(cap.as_ref())?;
+        crate::app::perf_mark("visuals built");
         self.animate_open()?;
         let win = self.win.as_ref().expect("window");
-        win.show(true);
+        unsafe {
+            let _ = ShowWindow(win.hwnd, SW_SHOWNA);
+        }
         win.commit()?;
         self.visible = true;
         if let Some(t) = self.perf_start.take() {
             log_info!("perf first-frame {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
         }
+        unsafe {
+            let _ = SetForegroundWindow(win.hwnd);
+        }
+        crate::app::perf_mark("foreground");
         Ok(())
     }
 
@@ -243,12 +266,11 @@ impl Toolbar {
         self.visible = false;
         let Some(win) = &self.win else { return };
         if self.animate {
-            if let Some(g) = &self.group {
-                let d = &self.gfx.dcomp;
-                let _ = apply_opacity(d, g, &AnimSpec::new(1.0, 0.0, CLOSE_MS, 0, Ease::InCubic), true);
-                let _ = apply_offset_y(d, g, &AnimSpec::new(0.0, self.phys(CLOSE_SLIDE_PX), CLOSE_MS, 0, Ease::InCubic), true);
+            if let (Some(g), Some(d)) = (&self.group, self.dcomp()) {
+                let _ = apply_opacity(&d, g, &AnimSpec::new(1.0, 0.0, CLOSE_MS, 0, Ease::InCubic), true);
+                let _ = apply_offset_y(&d, g, &AnimSpec::new(0.0, self.phys(CLOSE_SLIDE_PX), CLOSE_MS, 0, Ease::InCubic), true);
                 let c = self.plate_center();
-                let _ = apply_scale(d, g, &AnimSpec::new(1.0, 0.985, CLOSE_MS, 0, Ease::InCubic), c, true);
+                let _ = apply_scale(&d, g, &AnimSpec::new(1.0, 0.985, CLOSE_MS, 0, Ease::InCubic), c, true);
             }
             let _ = win.commit();
             win.set_timer(window::TIMER_HIDE, CLOSE_MS + 10);
@@ -335,7 +357,9 @@ impl Toolbar {
                         if r.index < self.cells.len() {
                             let _ = self.paint_cell(r.index);
                             let v = self.cells[r.index].visual.clone();
-                            let _ = apply_opacity(&self.gfx.dcomp, &v, &AnimSpec::new(0.3, 1.0, ICON_FADE_MS, 0, Ease::OutCubic), self.animate);
+                            if let Some(d) = self.dcomp() {
+                                let _ = apply_opacity(&d, &v, &AnimSpec::new(0.3, 1.0, ICON_FADE_MS, 0, Ease::OutCubic), self.animate);
+                            }
                             self.commit();
                         }
                     }
@@ -358,7 +382,7 @@ impl Toolbar {
     fn make_visual(&self, parent: &IDCompositionVisual2, r: Rect, last: &mut Option<IDCompositionVisual2>, f: impl FnOnce(&ID2D1DeviceContext) -> Result<()>) -> Result<Visual> {
         let surface = create_surface(&self.gfx, self.phys(r.w) as u32, self.phys(r.h) as u32)?;
         draw::draw(&surface, self.scale, f)?;
-        let visual = unsafe { self.gfx.dcomp.CreateVisual()? };
+        let visual = unsafe { self.gfx.dcomp()?.CreateVisual()? };
         unsafe {
             visual.SetContent(&surface.surface)?;
             visual.SetOffsetX2(self.phys(r.x))?;
@@ -370,8 +394,9 @@ impl Toolbar {
 
     fn build_visuals(&mut self, cap: Option<&Capture>) -> Result<()> {
         let win = self.win.as_ref().expect("window");
-        let dcomp = self.gfx.dcomp.clone();
-        unsafe { win.root.RemoveAllVisuals()? };
+        let dcomp = self.gfx.dcomp()?.clone();
+        let root = win.root()?.clone();
+        unsafe { root.RemoveAllVisuals()? };
         self.cells.clear();
         self.others.clear();
         self.arrows = None;
@@ -379,7 +404,7 @@ impl Toolbar {
 
         let group = unsafe { dcomp.CreateVisual()? };
         let mut root_last = None;
-        add_child(&win.root, &group, &mut root_last)?;
+        add_child(&root, &group, &mut root_last)?;
         let mut last = None;
 
         // Plato
@@ -391,6 +416,7 @@ impl Toolbar {
         unsafe { plate_visual.SetContent(&plate_surface.surface)? };
         add_child(&group, &plate_visual, &mut last)?;
         self.plate = Some(Visual { visual: plate_visual, surface: plate_surface });
+        crate::app::perf_mark("plate");
 
         // Celdas dentro de clip/content
         let n = self.layout.cells.len();
@@ -426,6 +452,7 @@ impl Toolbar {
         for i in 0..n {
             self.paint_cell(i)?;
         }
+        crate::app::perf_mark("cells");
 
         // Bordes desvanecidos y flechas
         if let Some(s) = self.layout.scroll.clone() {
@@ -568,20 +595,20 @@ impl Toolbar {
     }
 
     fn set_hover_anim(&self, h: Hit, scale_to: f32, lift: f32) {
-        if let Some(v) = self.visual_for(h) {
+        if let (Some(v), Some(d)) = (self.visual_for(h), self.dcomp()) {
             let c = (self.phys(Metrics::CELL / 2.0), self.phys(Metrics::CELL / 2.0));
-            let _ = apply_scale(&self.gfx.dcomp, v, &AnimSpec::new(if scale_to > 1.0 { 1.0 } else { 1.06 }, scale_to, HOVER_MS, 0, Ease::OutCubic), c, self.animate);
+            let _ = apply_scale(&d, v, &AnimSpec::new(if scale_to > 1.0 { 1.0 } else { 1.06 }, scale_to, HOVER_MS, 0, Ease::OutCubic), c, self.animate);
             let base_y = match h {
                 Hit::Cell(_) => 0.0,
                 _ => self.phys(Metrics::MARGIN + Metrics::PAD_Y),
             };
-            let _ = apply_offset_y(&self.gfx.dcomp, v, &AnimSpec::new(base_y, base_y - self.phys(lift), HOVER_MS, 0, Ease::OutCubic), self.animate);
+            let _ = apply_offset_y(&d, v, &AnimSpec::new(base_y, base_y - self.phys(lift), HOVER_MS, 0, Ease::OutCubic), self.animate);
         }
     }
 
     fn animate_open(&mut self) -> Result<()> {
         let Some(g) = &self.group else { return Ok(()) };
-        let d = &self.gfx.dcomp;
+        let d = self.gfx.dcomp()?;
         let c = self.plate_center();
         apply_opacity(d, g, &AnimSpec::new(0.0, 1.0, OPEN_PLATE_MS, 0, Ease::OutCubic), self.animate)?;
         apply_offset_y(d, g, &AnimSpec::new(self.phys(SLIDE_PX), 0.0, OPEN_PLATE_MS, 0, Ease::OutCubic), self.animate)?;
@@ -629,17 +656,17 @@ impl Toolbar {
         self.pressed = p;
         if let Some(o) = old {
             self.repaint_hit(o);
-            if let Some(v) = self.visual_for(o) {
+            if let (Some(v), Some(d)) = (self.visual_for(o), self.dcomp()) {
                 let c = (self.phys(Metrics::CELL / 2.0), self.phys(Metrics::CELL / 2.0));
                 let to = if self.hover == o { 1.06 } else { 1.0 };
-                let _ = apply_scale(&self.gfx.dcomp, v, &AnimSpec::new(0.94, to, PRESS_MS, 0, Ease::OutCubic), c, self.animate);
+                let _ = apply_scale(&d, v, &AnimSpec::new(0.94, to, PRESS_MS, 0, Ease::OutCubic), c, self.animate);
             }
         }
         if let Some(n) = p {
             self.repaint_hit(n);
-            if let Some(v) = self.visual_for(n) {
+            if let (Some(v), Some(d)) = (self.visual_for(n), self.dcomp()) {
                 let c = (self.phys(Metrics::CELL / 2.0), self.phys(Metrics::CELL / 2.0));
-                let _ = apply_scale(&self.gfx.dcomp, v, &AnimSpec::new(1.06, 0.94, PRESS_MS, 0, Ease::OutCubic), c, self.animate);
+                let _ = apply_scale(&d, v, &AnimSpec::new(1.06, 0.94, PRESS_MS, 0, Ease::OutCubic), c, self.animate);
             }
         }
         self.commit();
@@ -697,9 +724,9 @@ impl Toolbar {
         let from = self.scroll_offset;
         self.scroll_offset = target;
         self.relayout();
-        if let Some(c) = &self.content {
+        if let (Some(c), Some(d)) = (&self.content, self.dcomp()) {
             let animate = self.animate && ms > 0;
-            let _ = apply_offset_x(&self.gfx.dcomp, c, &AnimSpec::new(-self.phys(from), -self.phys(target), ms.max(1), 0, Ease::OutCubic), animate);
+            let _ = apply_offset_x(&d, c, &AnimSpec::new(-self.phys(from), -self.phys(target), ms.max(1), 0, Ease::OutCubic), animate);
         }
         self.update_scroll_chrome();
         self.commit();
@@ -707,7 +734,8 @@ impl Toolbar {
 
     fn update_scroll_chrome(&self) {
         let Some(s) = &self.layout.scroll else { return };
-        let d = &self.gfx.dcomp;
+        let Some(d) = self.dcomp() else { return };
+        let d = &d;
         if let Some((lf, rf)) = &self.fades {
             let _ = apply_opacity(d, &lf.visual, &AnimSpec::new(if s.fade_left { 0.0 } else { 1.0 }, if s.fade_left { 1.0 } else { 0.0 }, 120, 0, Ease::OutCubic), self.animate);
             let _ = apply_opacity(d, &rf.visual, &AnimSpec::new(if s.fade_right { 0.0 } else { 1.0 }, if s.fade_right { 1.0 } else { 0.0 }, 120, 0, Ease::OutCubic), self.animate);

@@ -21,6 +21,28 @@ Conclusiones:
 
 ## Binario real
 
-| Fecha | Build | first-frame | segunda instancia | memoria residente | exe |
-|---|---|---|---|---|---|
-| (pendiente) | | | | | |
+Medido con `Glassbar.exe --perf`, que anota cada fase en `log.txt`. Arranque en frío bajo demanda, 10 entradas, caché de iconos válida.
+
+| Fecha | Build | first-frame | Notas |
+|---|---|---|---|
+| 2026-10-30 | primera barra funcional | 88,6 ms | dispositivos en el hilo principal, Acrylic a resolución completa |
+| 2026-10-30 | dispositivos en hilo aparte, Acrylic a media resolución, sondeo HDR asíncrono, foco tras el primer frame | 60,7 a 68,3 ms | el hilo de dispositivos (WARP + D2D + DWrite + WIC, 40 a 44 ms) es el camino crítico; el hilo principal lo espera unos 25 ms tras crear la ventana y capturar |
+
+Fases de un arranque representativo (65 ms):
+
+| Fase | Acumulado |
+|---|---|
+| main | 2,5 ms |
+| datos y caché cargados | 4,5 ms |
+| ventana creada | 10,5 ms |
+| captura de pantalla a media resolución | 17 ms |
+| dispositivos listos (hilo aparte) | 45 ms |
+| iconos, plato, celdas y botones | 61 ms |
+| primer frame enviado a DWM | 65 ms |
+| ventana en primer plano | 73 ms |
+
+Lo que queda por encima de los 50 ms objetivo es la carga de `d3d11.dll`, `d3d10warp.dll`, `d2d1.dll`, `dwrite.dll`, `windowscodecs.dll` y `dcomp.dll`, que no depende de la app. Se acepta: por debajo de 100 ms se percibe como instantáneo.
+
+| Fecha | segunda instancia | memoria privada visible | exe |
+|---|---|---|---|
+| (pendiente) | | 23,7 MB | 567 KB |

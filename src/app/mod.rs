@@ -11,7 +11,17 @@ use crate::ui::window;
 use crate::{fsx, i18n};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::Instant;
+
+static PERF: OnceLock<Instant> = OnceLock::new();
+
+/// Con `--perf`, anota en el log el tiempo desde el arranque hasta esta fase.
+pub fn perf_mark(label: &str) {
+    if let Some(t) = PERF.get() {
+        log_info!("perf {:>7.1} ms  {label}", t.elapsed().as_secs_f64() * 1000.0);
+    }
+}
 
 pub fn load_settings() -> Settings {
     let path = fsx::settings_path();
@@ -63,24 +73,24 @@ pub fn run(args: Vec<String>) -> i32 {
     crate::log::init();
     crate::gfx::device::co_init();
     let perf = args.iter().any(|a| a == "--perf");
+    if perf {
+        let _ = PERF.set(start);
+    }
+    perf_mark("main");
+    let gfx = Rc::new(Gfx::start());
 
     let settings = load_settings();
     i18n::set_lang(settings.effective_language());
     let entries = load_entries();
     fsx::clear_dir(&fsx::update_dir());
+    perf_mark("data loaded");
 
-    let gfx = match Gfx::create() {
-        Ok(g) => Rc::new(g),
-        Err(e) => {
-            log_error!("graphics init failed: {e}");
-            return 1;
-        }
-    };
     let cache = IconCache::load(&fsx::cache_path());
+    perf_mark("cache loaded");
     let settings = Rc::new(RefCell::new(settings));
     let entries = Rc::new(RefCell::new(entries));
 
-    let bar = Toolbar::new(gfx, entries, settings, cache, Box::new(window::post_quit), if perf { Some(start) } else { None });
+    let bar = Toolbar::new(gfx, entries, settings, cache, Box::new(window::post_quit), perf.then_some(start));
     bar.borrow_mut().show();
     let code = window::run_message_loop();
     log_info!("exit {code}");

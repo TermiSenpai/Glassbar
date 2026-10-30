@@ -57,11 +57,15 @@ impl PopupStyle {
     pub const DIALOG: PopupStyle = PopupStyle { topmost: false, tool: false, no_activate: false, app_window: true };
 }
 
-pub struct Window {
-    pub hwnd: HWND,
+pub struct Comp {
     pub target: IDCompositionTarget,
     pub root: IDCompositionVisual2,
     pub dcomp: IDCompositionDesktopDevice,
+}
+
+pub struct Window {
+    pub hwnd: HWND,
+    pub comp: Option<Comp>,
     pub scale: Cell<f32>,
 }
 
@@ -140,7 +144,15 @@ fn ensure_class(name: &[u16]) {
 }
 
 impl Window {
+    /// Crea la ventana y le acopla la composición. Para ventanas creadas cuando los dispositivos ya existen.
     pub fn create(gfx: &Gfx, class: &str, style: PopupStyle, w: i32, h: i32, handler: Handler) -> Result<Window> {
+        let mut win = Window::create_hwnd(class, style, w, h, handler)?;
+        win.attach(gfx)?;
+        Ok(win)
+    }
+
+    /// Solo el HWND. La composición se acopla después con `attach`, cuando los dispositivos estén listos.
+    pub fn create_hwnd(class: &str, style: PopupStyle, w: i32, h: i32, handler: Handler) -> Result<Window> {
         unsafe {
             let class_w = wide(class);
             ensure_class(&class_w);
@@ -168,11 +180,26 @@ impl Window {
                 let _ = DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &excluded as *const BOOL as *const c_void, size_of::<BOOL>() as u32);
             }
             let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
-            let target = gfx.dcomp.CreateTargetForHwnd(hwnd, true)?;
-            let root = gfx.dcomp.CreateVisual()?;
-            target.SetRoot(&root)?;
-            Ok(Window { hwnd, target, root, dcomp: gfx.dcomp.clone(), scale: Cell::new(scale) })
+            Ok(Window { hwnd, comp: None, scale: Cell::new(scale) })
         }
+    }
+
+    pub fn attach(&mut self, gfx: &Gfx) -> Result<()> {
+        if self.comp.is_some() {
+            return Ok(());
+        }
+        let dcomp = gfx.dcomp()?.clone();
+        unsafe {
+            let target = dcomp.CreateTargetForHwnd(self.hwnd, true)?;
+            let root = dcomp.CreateVisual()?;
+            target.SetRoot(&root)?;
+            self.comp = Some(Comp { target, root, dcomp });
+        }
+        Ok(())
+    }
+
+    pub fn root(&self) -> Result<&IDCompositionVisual2> {
+        self.comp.as_ref().map(|c| &c.root).ok_or_else(|| Error::from(E_FAIL))
     }
 
     pub fn move_to(&self, x: i32, y: i32, w: i32, h: i32) {
@@ -203,7 +230,10 @@ impl Window {
     }
 
     pub fn commit(&self) -> Result<()> {
-        unsafe { self.dcomp.Commit() }
+        match &self.comp {
+            Some(c) => unsafe { c.dcomp.Commit() },
+            None => Ok(()),
+        }
     }
 
     pub fn set_timer(&self, id: usize, ms: u32) {

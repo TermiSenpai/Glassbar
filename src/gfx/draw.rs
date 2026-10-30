@@ -20,7 +20,7 @@ pub struct Surface {
 }
 
 pub fn create_surface(gfx: &Gfx, w: u32, h: u32) -> Result<Surface> {
-    let surface = unsafe { gfx.dcomp.CreateSurface(w.max(1), h.max(1), DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED)? };
+    let surface = unsafe { gfx.dcomp()?.CreateSurface(w.max(1), h.max(1), DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED)? };
     Ok(Surface { surface, w: w.max(1), h: h.max(1) })
 }
 
@@ -80,26 +80,6 @@ pub fn stroke_circle(dc: &ID2D1DeviceContext, cx: f32, cy: f32, radius: f32, c: 
     Ok(())
 }
 
-/// Estilo de trazo con extremos y uniones redondeados, para glifos.
-pub fn round_stroke(gfx: &Gfx) -> Result<ID2D1StrokeStyle> {
-    unsafe {
-        let s1: ID2D1StrokeStyle1 = gfx.d2d_factory.CreateStrokeStyle(
-            &D2D1_STROKE_STYLE_PROPERTIES1 {
-                startCap: D2D1_CAP_STYLE_ROUND,
-                endCap: D2D1_CAP_STYLE_ROUND,
-                dashCap: D2D1_CAP_STYLE_ROUND,
-                lineJoin: D2D1_LINE_JOIN_ROUND,
-                miterLimit: 10.0,
-                dashStyle: D2D1_DASH_STYLE_SOLID,
-                dashOffset: 0.0,
-                transformType: D2D1_STROKE_TRANSFORM_TYPE_NORMAL,
-            },
-            None,
-        )?;
-        s1.cast()
-    }
-}
-
 pub fn line(dc: &ID2D1DeviceContext, x0: f32, y0: f32, x1: f32, y1: f32, b: &ID2D1SolidColorBrush, width: f32, style: &ID2D1StrokeStyle) {
     unsafe { dc.DrawLine(pt(x0, y0), pt(x1, y1), b, width, Some(style)) };
 }
@@ -150,7 +130,8 @@ fn family(gfx: &Gfx) -> &'static [u16] {
     FAMILY.get_or_init(|| unsafe {
         let mut coll: Option<IDWriteFontCollection> = None;
         let candidate = wide("Segoe UI Variable Text");
-        if gfx.dwrite.GetSystemFontCollection(&mut coll, false).is_ok() {
+        let Ok(dw) = gfx.dwrite() else { return wide("Segoe UI") };
+        if dw.GetSystemFontCollection(&mut coll, false).is_ok() {
             if let Some(c) = coll {
                 let mut idx = 0u32;
                 let mut exists = BOOL(0);
@@ -167,10 +148,10 @@ pub fn text_format(gfx: &Gfx, style: &TextStyle) -> Result<IDWriteTextFormat> {
     unsafe {
         let fam = if style.mono { wide("Consolas") } else { family(gfx).to_vec() };
         let weight = if style.bold { DWRITE_FONT_WEIGHT_SEMI_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL };
-        let f = gfx.dwrite.CreateTextFormat(PCWSTR(fam.as_ptr()), None, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, style.size, w!(""))?;
+        let f = gfx.dwrite()?.CreateTextFormat(PCWSTR(fam.as_ptr()), None, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, style.size, w!(""))?;
         f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
         f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
-        let sign = gfx.dwrite.CreateEllipsisTrimmingSign(&f)?;
+        let sign = gfx.dwrite()?.CreateEllipsisTrimmingSign(&f)?;
         f.SetTrimming(&DWRITE_TRIMMING { granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER, delimiter: 0, delimiterCount: 0 }, &sign)?;
         Ok(f)
     }
@@ -181,7 +162,7 @@ pub fn text_layout(gfx: &Gfx, text: &str, style: &TextStyle, max_w: f32, max_h: 
     unsafe {
         let f = text_format(gfx, style)?;
         let w: Vec<u16> = text.encode_utf16().collect();
-        gfx.dwrite.CreateTextLayout(&w, &f, max_w.max(1.0), max_h.max(1.0))
+        gfx.dwrite()?.CreateTextLayout(&w, &f, max_w.max(1.0), max_h.max(1.0))
     }
 }
 
@@ -242,7 +223,7 @@ pub enum Glyph {
 
 pub fn glyph(gfx: &Gfx, dc: &ID2D1DeviceContext, g: Glyph, r: Rect, c: Color) -> Result<()> {
     let b = brush(dc, c)?;
-    let st = round_stroke(gfx)?;
+    let st: ID2D1StrokeStyle = gfx.round_stroke()?.clone();
     let w = (r.w / 12.0).max(1.4);
     let (cx, cy) = r.center();
     let u = r.w / 24.0; // unidad: el glifo se diseña en una caja de 24×24
@@ -348,7 +329,7 @@ pub fn glyph(gfx: &Gfx, dc: &ID2D1DeviceContext, g: Glyph, r: Rect, c: Color) ->
             }
             Glyph::Theme => {
                 dc.DrawEllipse(&D2D1_ELLIPSE { point: pt(cx, cy), radiusX: 9.0 * u, radiusY: 9.0 * u }, &b, w, Some(&st));
-                let geo = gfx.d2d_factory.CreatePathGeometry()?;
+                let geo = gfx.d2d_factory()?.CreatePathGeometry()?;
                 let sink = geo.Open()?;
                 sink.BeginFigure(pt(cx, y(3.0)), D2D1_FIGURE_BEGIN_FILLED);
                 sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(cx, y(21.0)), size: D2D_SIZE_F { width: 9.0 * u, height: 9.0 * u }, rotationAngle: 0.0, sweepDirection: D2D1_SWEEP_DIRECTION_CLOCKWISE, arcSize: D2D1_ARC_SIZE_SMALL });
@@ -365,7 +346,7 @@ pub fn glyph(gfx: &Gfx, dc: &ID2D1DeviceContext, g: Glyph, r: Rect, c: Color) ->
                 line(dc, x(12.0), y(10.0), x(13.0), y(2.0), &b, w, &st);
             }
             Glyph::Refresh => {
-                let geo = gfx.d2d_factory.CreatePathGeometry()?;
+                let geo = gfx.d2d_factory()?.CreatePathGeometry()?;
                 let sink = geo.Open()?;
                 sink.BeginFigure(pt(x(18.0), y(5.3)), D2D1_FIGURE_BEGIN_HOLLOW);
                 sink.AddArc(&D2D1_ARC_SEGMENT { point: pt(x(5.0), y(10.0)), size: D2D_SIZE_F { width: 9.0 * u, height: 9.0 * u }, rotationAngle: 0.0, sweepDirection: D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, arcSize: D2D1_ARC_SIZE_LARGE });
