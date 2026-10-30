@@ -93,6 +93,10 @@ pub fn destroy_all_windows() {
     }
 }
 
+pub unsafe extern "system" fn wndproc_export(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe { wndproc(hwnd, msg, wparam, lparam) }
+}
+
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         if msg == WM_NCCREATE {

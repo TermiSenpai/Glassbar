@@ -1109,7 +1109,14 @@ impl Toolbar {
     }
 
     pub fn open_settings(&mut self) {
-        log_info!("settings (pending task)");
+        crate::app::open_settings();
+        self.hide();
+    }
+
+    /// Nueva paleta o idioma: reconstruye si está visible; si no, se aplicará en la siguiente apertura.
+    pub fn theme_changed(&mut self) {
+        self.pal = theme::palette(self.settings.borrow().theme);
+        self.rebuild();
     }
 
     // ---- interacción ----

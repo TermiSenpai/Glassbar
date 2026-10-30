@@ -36,6 +36,9 @@ pub struct Dialog {
     on_event: EventFn,
     closed: bool,
     caret_timer: bool,
+    view_h: f32,
+    scroll: f32,
+    content_visual: Option<windows::Win32::Graphics::DirectComposition::IDCompositionVisual2>,
 }
 
 const DWMSBT_MAINWINDOW: u32 = 2;
@@ -44,7 +47,7 @@ const DWMWCP_ROUND: u32 = 2;
 impl Dialog {
     /// Crea, coloca centrada en el monitor del cursor y muestra la ventana.
     pub fn open(gfx: &Rc<Gfx>, pal: &Palette, title: &str, width: f32, form: Form, on_event: EventFn) -> Result<Rc<RefCell<Dialog>>> {
-        let rc = Rc::new(RefCell::new(Dialog { gfx: gfx.clone(), pal: *pal, form, win: None, surface: None, scale: 1.0, mica: false, on_event, closed: false, caret_timer: false }));
+        let rc = Rc::new(RefCell::new(Dialog { gfx: gfx.clone(), pal: *pal, form, win: None, surface: None, scale: 1.0, mica: false, on_event, closed: false, caret_timer: false, view_h: 0.0, scroll: 0.0, content_visual: None }));
         let handler: Handler = rc.clone();
         let mon = window::cursor_monitor();
         let scale = mon.scale;
@@ -57,7 +60,13 @@ impl Dialog {
             d.scale = scale;
         }
         let phys = |v: f32| (v * scale).round() as i32;
-        let (w, h) = (phys(width), phys(form_h));
+        let max_h = ((mon.work_phys.bottom - mon.work_phys.top) as f32 / scale - 80.0).max(200.0);
+        let view_h = form_h.min(max_h);
+        let (w, h) = (phys(width), phys(view_h));
+        {
+            let mut d = rc.borrow_mut();
+            d.view_h = view_h;
+        }
         let win = Window::create(gfx, "Glassbar.Dialog", PopupStyle::DIALOG, w, h, handler)?;
         win.set_title(title);
         let x = mon.work_phys.left + ((mon.work_phys.right - mon.work_phys.left) - w) / 2;
@@ -83,6 +92,24 @@ impl Dialog {
         self.win.as_ref().map(|w| w.hwnd).unwrap_or_default()
     }
 
+    pub fn is_open(&self) -> bool {
+        !self.closed && self.win.is_some()
+    }
+
+    pub fn activate(&self) {
+        if let Some(w) = &self.win {
+            w.show(true);
+        }
+    }
+
+    pub fn set_palette(&mut self, pal: Palette) {
+        self.pal = pal;
+        if let Some(w) = &self.win {
+            self.mica = apply_backdrop(w.hwnd, pal.dark);
+        }
+        let _ = self.repaint();
+    }
+
     fn phys(&self, v: f32) -> f32 {
         (v * self.scale).round()
     }
@@ -96,7 +123,9 @@ impl Dialog {
             root.RemoveAllVisuals()?;
             let v = self.gfx.dcomp()?.CreateVisual()?;
             v.SetContent(&s.surface)?;
+            v.SetOffsetY2(-self.phys(self.scroll))?;
             root.AddVisual(&v, true, None)?;
+            self.content_visual = Some(v);
         }
         self.surface = Some(s);
         Ok(())
@@ -107,11 +136,14 @@ impl Dialog {
         let old_h = self.form.content_h;
         self.form.layout();
         if (self.form.content_h - old_h).abs() > 0.5 {
+            let max_h = self.view_h.max(200.0);
+            let view = self.form.content_h.min(max_h);
             if let Some(win) = &self.win {
                 let r = win.rect();
-                let (w, h) = (self.phys(self.form.width) as i32, self.phys(self.form.content_h) as i32);
+                let (w, h) = (self.phys(self.form.width) as i32, self.phys(view) as i32);
                 win.move_to(r.left, r.top, w, h);
             }
+            self.scroll = self.scroll.min((self.form.content_h - view).max(0.0));
             self.rebuild_surface()?;
         }
         self.repaint()
@@ -215,9 +247,26 @@ impl WindowHandler for Dialog {
             return None;
         }
         match msg {
+            WM_MOUSEWHEEL => {
+                let delta = window::wheel_delta(wparam) as f32 / 120.0;
+                let view = self.view_h.max(200.0).min(self.form.content_h);
+                let max = (self.form.content_h - view).max(0.0);
+                let target = (self.scroll - delta * 60.0).clamp(0.0, max);
+                if (target - self.scroll).abs() > 0.1 {
+                    self.scroll = target;
+                    if let (Some(v), Ok(d)) = (&self.content_visual, self.gfx.dcomp()) {
+                        let _ = crate::gfx::anim::apply_offset_y(d, v, &crate::gfx::anim::AnimSpec::new(0.0, -self.phys(self.scroll), 120, 0, crate::gfx::anim::Ease::OutCubic), false);
+                    }
+                    if let Some(w) = &self.win {
+                        let _ = w.commit();
+                    }
+                }
+                Some(LRESULT(0))
+            }
             WM_MOUSEMOVE => {
                 let (x, y) = window::lparam_xy(lparam);
-                if self.form.on_mouse_move(x as f32 / self.scale, y as f32 / self.scale) {
+                let y = y as f32 / self.scale + self.scroll;
+                if self.form.on_mouse_move(x as f32 / self.scale, y) {
                     let _ = self.repaint();
                 }
                 window::invalidate_tracking(ctx.hwnd);
@@ -231,8 +280,9 @@ impl WindowHandler for Dialog {
             }
             WM_LBUTTONDOWN => {
                 let (x, y) = window::lparam_xy(lparam);
+                let y = y as f32 / self.scale + self.scroll;
                 window::capture_mouse(ctx.hwnd);
-                let ev = self.form.on_mouse_down(x as f32 / self.scale, y as f32 / self.scale);
+                let ev = self.form.on_mouse_down(x as f32 / self.scale, y);
                 self.update_caret_timer();
                 self.handle(ev);
                 Some(LRESULT(0))
@@ -240,7 +290,8 @@ impl WindowHandler for Dialog {
             WM_LBUTTONUP => {
                 window::release_mouse();
                 let (x, y) = window::lparam_xy(lparam);
-                let ev = self.form.on_mouse_up(x as f32 / self.scale, y as f32 / self.scale);
+                let y = y as f32 / self.scale + self.scroll;
+                let ev = self.form.on_mouse_up(x as f32 / self.scale, y);
                 self.handle(ev);
                 Some(LRESULT(0))
             }
@@ -267,7 +318,7 @@ impl WindowHandler for Dialog {
             WM_SETCURSOR => {
                 let (sx, sy) = window::cursor_pos();
                 let (cx, cy) = window::screen_to_client(ctx.hwnd, sx, sy);
-                let (lx, ly) = (cx as f32 / self.scale, cy as f32 / self.scale);
+                let (lx, ly) = (cx as f32 / self.scale, cy as f32 / self.scale + self.scroll);
                 let kind = self.form.hit(lx, ly).and_then(|id| self.form.get(id)).map(|w| (w.kind.clone(), w.enabled));
                 match kind {
                     Some((Kind::TextField(_), true)) => window::set_ibeam_cursor(),
@@ -279,7 +330,7 @@ impl WindowHandler for Dialog {
             WM_NCHITTEST => {
                 let (sx, sy) = window::lparam_xy(lparam);
                 let (cx, cy) = window::screen_to_client(ctx.hwnd, sx, sy);
-                if self.header_hit(cx as f32 / self.scale, cy as f32 / self.scale) { Some(LRESULT(HTCAPTION as isize)) } else { Some(LRESULT(HTCLIENT as isize)) }
+                if self.header_hit(cx as f32 / self.scale, cy as f32 / self.scale + self.scroll) { Some(LRESULT(HTCAPTION as isize)) } else { Some(LRESULT(HTCLIENT as isize)) }
             }
             WM_TIMER if wparam.0 == window::TIMER_CARET => {
                 self.form.caret_visible = !self.form.caret_visible;

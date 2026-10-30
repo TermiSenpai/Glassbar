@@ -338,6 +338,11 @@ impl Form {
             Kind::Label { text, size, .. } => text.chars().count() as f32 * size * 0.55 + 8.0,
             Kind::IconPreview { .. } => 64.0,
             Kind::TextField(_) => 200.0,
+            Kind::Row { children, .. } => {
+                let ws: f32 = children.iter().filter_map(|c| self.get(*c)).filter(|w| w.visible).map(|w| self.child_width(w)).sum();
+                let n = children.iter().filter_map(|c| self.get(*c)).filter(|w| w.visible).count();
+                ws + ROW_GAP * n.saturating_sub(1) as f32
+            }
             _ => 100.0,
         }
     }
@@ -378,12 +383,14 @@ impl Form {
                 if let Some(w) = self.get_mut(c) {
                     w.rect = cr;
                 }
+                self.layout_children(c, cr);
             }
             Some(Kind::Row { children, align_right }) => {
-                let widths: Vec<f32> = children.iter().map(|c| self.get(*c).map(|w| self.child_width(w)).unwrap_or(80.0)).collect();
-                let total: f32 = widths.iter().sum::<f32>() + ROW_GAP * (children.len().saturating_sub(1)) as f32;
+                let visible: Vec<WidgetId> = children.iter().copied().filter(|c| self.get(*c).map(|w| w.visible).unwrap_or(false)).collect();
+                let widths: Vec<f32> = visible.iter().map(|c| self.get(*c).map(|w| self.child_width(w)).unwrap_or(80.0)).collect();
+                let total: f32 = widths.iter().sum::<f32>() + ROW_GAP * (visible.len().saturating_sub(1)) as f32;
                 let mut x = if align_right { r.right() - total } else { r.x };
-                for (c, cw) in children.iter().zip(widths) {
+                for (c, cw) in visible.iter().zip(widths) {
                     let ch = self.get(*c).map(|w| self.height_of(w)).unwrap_or(CONTROL_H);
                     let cr = Rect::new(x, r.y + (r.h - ch) / 2.0, cw, ch);
                     if let Some(w) = self.get_mut(*c) {
@@ -807,7 +814,11 @@ impl Form {
                     draw::glyph(gfx, dc, *g, Rect::new(r.x + 14.0, r.y + (r.h - 18.0) / 2.0, 18.0, 18.0), pal.glyph.with_alpha(alpha))?;
                     tx += 30.0;
                 }
-                let tw = r.w - (tx - r.x) - 200.0;
+                let child_w = match &w.kind {
+                    Kind::Card { child: Some(c), .. } => self.get(*c).map(|cw| self.child_width(cw) + 28.0).unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                let tw = (r.w - (tx - r.x) - child_w).max(60.0);
                 match subtitle {
                     Some(sub) => {
                         let l = draw::text_layout(gfx, title, &TextStyle::normal(13.0), tw, 20.0)?;
