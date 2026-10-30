@@ -366,13 +366,22 @@ pub fn run(args: Vec<String>) -> i32 {
     let updated_old = args.iter().position(|a| a == "--updated").and_then(|i| args.get(i + 1).cloned());
     perf_mark("main");
 
-    // Instancia única: la segunda solo avisa a la primera.
-    let _mutex = match instance::acquire() {
-        instance::Instance::Primary(h) => h,
-        instance::Instance::Secondary => {
-            let ok = instance::signal_toggle();
-            perf_mark(if ok { "toggle sent" } else { "toggle failed" });
-            return 0;
+    // Instancia única: la segunda solo avisa a la primera. Tras una actualización, el proceso
+    // nuevo arranca mientras el viejo aún está saliendo: se le da hasta 5 s para soltar el mutex.
+    let mut attempts = if updated_old.is_some() { 50 } else { 1 };
+    let _mutex = loop {
+        match instance::acquire() {
+            instance::Instance::Primary(h) => break h,
+            instance::Instance::Secondary => {
+                attempts -= 1;
+                if attempts > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+                let ok = instance::signal_toggle();
+                perf_mark(if ok { "toggle sent" } else { "toggle failed" });
+                return 0;
+            }
         }
     };
 
