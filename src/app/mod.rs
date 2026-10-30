@@ -16,6 +16,39 @@ use std::time::Instant;
 
 static PERF: OnceLock<Instant> = OnceLock::new();
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+static OPEN_WINDOWS: AtomicUsize = AtomicUsize::new(0);
+static RESIDENT: AtomicBool = AtomicBool::new(false);
+static BAR_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+pub fn window_opened() {
+    OPEN_WINDOWS.fetch_add(1, Ordering::SeqCst);
+}
+
+pub fn window_closed() {
+    OPEN_WINDOWS.fetch_sub(1, Ordering::SeqCst);
+    maybe_exit();
+}
+
+pub fn set_resident(on: bool) {
+    RESIDENT.store(on, Ordering::SeqCst);
+}
+
+pub fn set_bar_visible(on: bool) {
+    BAR_VISIBLE.store(on, Ordering::SeqCst);
+    if !on {
+        maybe_exit();
+    }
+}
+
+/// Sale del proceso cuando no es residente y no queda ninguna ventana abierta.
+pub fn maybe_exit() {
+    if !RESIDENT.load(Ordering::SeqCst) && !BAR_VISIBLE.load(Ordering::SeqCst) && OPEN_WINDOWS.load(Ordering::SeqCst) == 0 {
+        window::post_quit();
+    }
+}
+
 /// Con `--perf`, anota en el log el tiempo desde el arranque hasta esta fase.
 pub fn perf_mark(label: &str) {
     if let Some(t) = PERF.get() {
@@ -90,7 +123,7 @@ pub fn run(args: Vec<String>) -> i32 {
     let settings = Rc::new(RefCell::new(settings));
     let entries = Rc::new(RefCell::new(entries));
 
-    let bar = Toolbar::new(gfx, entries, settings, cache, Box::new(window::post_quit), perf.then_some(start));
+    let bar = Toolbar::new(gfx, entries, settings, cache, Box::new(|| set_bar_visible(false)), perf.then_some(start));
     bar.borrow_mut().show();
     let code = window::run_message_loop();
     log_info!("exit {code}");
