@@ -54,4 +54,5 @@ Se pasa con `target\release\Glassbar.exe` antes de cada release. Marcado el esta
 - [x] Comprobación automática al arrancar: sin release publicada muestra "Error: HTTP 404" en ajustes y no afecta a la barra. Con release publicada, la redirección de `releases/latest` devuelve la etiqueta y el estado pasa a "Nueva versión disponible".
 - [x] Contra una release real (v2.0.1): un exe de prueba con versión 1.5.0 detecta "Nueva versión 2.0.1 disponible".
 - [x] Actualizar descarga `Glassbar.exe` y `SHA256SUMS`, verifica la suma, renombra el exe en uso a `.old`, coloca el nuevo (byte a byte igual al de la release) y lo relanza con `--updated`.
+- [x] Reinicio automático: desde la release real 2.0.4, Actualizar descarga 2.0.5, intercambia el exe y el proceso viejo sale solo 1,8 s después del clic tras lanzar el nuevo con `--updated`; el `.old` queda borrado y la suma coincide con `SHA256SUMS`. (2026-10-31, instancia aislada)
 - [ ] Suma incorrecta: "La descarga no supera la verificación" y el exe actual no se toca. (pendiente: requiere publicar una release con suma manipulada)
