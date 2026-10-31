@@ -16,10 +16,11 @@ fn last_error_message() -> String {
     if m.is_empty() { format!("{:?}", e.code()) } else { m }
 }
 
-/// Abre el archivo con el verbo `open` del shell, con su carpeta como directorio de trabajo.
-pub fn launch(path: &Path) -> std::result::Result<(), String> {
+/// Abre el archivo con el verbo `open` del shell. Directorio de trabajo: el indicado o la carpeta del archivo.
+pub fn launch(path: &Path, args: &str, working_dir: Option<&Path>) -> std::result::Result<(), String> {
     let file = wide(&path.to_string_lossy());
-    let dir = path.parent().map(|d| wide(&d.to_string_lossy()));
+    let dir = working_dir.filter(|d| d.is_dir()).or_else(|| path.parent()).map(|d| wide(&d.to_string_lossy()));
+    let params = if args.trim().is_empty() { None } else { Some(wide(args)) };
     let verb = wide("open");
     unsafe {
         let mut info = SHELLEXECUTEINFOW {
@@ -27,6 +28,7 @@ pub fn launch(path: &Path) -> std::result::Result<(), String> {
             fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
             lpVerb: PCWSTR(verb.as_ptr()),
             lpFile: PCWSTR(file.as_ptr()),
+            lpParameters: params.as_ref().map(|p| PCWSTR(p.as_ptr())).unwrap_or(PCWSTR::null()),
             lpDirectory: dir.as_ref().map(|d| PCWSTR(d.as_ptr())).unwrap_or(PCWSTR::null()),
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()

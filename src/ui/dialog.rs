@@ -13,6 +13,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::UI::Controls::{MARGINS, WM_MOUSELEAVE};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, Result};
 
@@ -69,6 +70,7 @@ impl Dialog {
         }
         let win = Window::create(gfx, "Glassbar.Dialog", PopupStyle::DIALOG, w, h, handler)?;
         win.set_title(title);
+        unsafe { DragAcceptFiles(win.hwnd, true) };
         let x = mon.work_phys.left + ((mon.work_phys.right - mon.work_phys.left) - w) / 2;
         let y = mon.work_phys.top + ((mon.work_phys.bottom - mon.work_phys.top) - h) / 2;
         win.move_to(x, y, w, h);
@@ -349,6 +351,24 @@ impl WindowHandler for Dialog {
             }
             WM_CLOSE => {
                 self.handle(Some(Event::Cancel));
+                Some(LRESULT(0))
+            }
+            WM_DROPFILES => {
+                let hdrop = HDROP(wparam.0 as *mut c_void);
+                let mut paths = Vec::new();
+                unsafe {
+                    let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, None);
+                    for i in 0..count {
+                        let len = DragQueryFileW(hdrop, i, None) as usize;
+                        let mut buf = vec![0u16; len + 1];
+                        DragQueryFileW(hdrop, i, Some(&mut buf));
+                        paths.push(std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len])));
+                    }
+                    DragFinish(hdrop);
+                }
+                if !paths.is_empty() {
+                    self.handle(Some(Event::FilesDropped(paths)));
+                }
                 Some(LRESULT(0))
             }
             window::WM_THEME_CHANGED => {

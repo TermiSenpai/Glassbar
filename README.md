@@ -25,7 +25,7 @@ If you used BatLauncher before, your entries and icons are imported automaticall
 | Open the bar | Click the pinned icon. |
 | Launch an entry | Click its icon, or focus it with the arrow keys and press Enter. |
 | Close the bar | Press Escape, click anywhere else, or launch an entry. |
-| Add an entry | Click **+**, or drop `.bat`, `.cmd`, `.exe` or `.lnk` files onto the bar. |
+| Add an entry | Click **+**, or drop `.bat`, `.cmd`, `.exe` or `.lnk` files onto the bar or onto the new-entry window. Shortcuts are resolved to their target, so the `.lnk` can be deleted afterwards. |
 | Edit, reorder, remove | Right-click an icon. |
 | Many entries | The bar caps at 80 % of the screen and becomes a carousel: drag it, use the wheel, or the arrows at both ends. |
 | Settings | Click the gear. |

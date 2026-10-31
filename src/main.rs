@@ -9,6 +9,7 @@ mod i18n;
 mod icons;
 mod launch;
 mod model;
+mod shortcut;
 mod theme;
 mod ui;
 mod update;

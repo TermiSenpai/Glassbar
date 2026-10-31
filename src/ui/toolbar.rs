@@ -1042,8 +1042,10 @@ impl Toolbar {
                 e.name = r.name;
                 e.path = r.path;
                 e.icon = icon;
+                e.args = r.args;
+                e.working_dir = r.working_dir;
             }
-            None => es.add(Entry { id: entry_id, name: r.name, path: r.path, icon, created_at: fsx::now_iso(), extra: Default::default() }),
+            None => es.add(Entry { id: entry_id, name: r.name, path: r.path, icon, created_at: fsx::now_iso(), args: r.args, working_dir: r.working_dir, extra: Default::default() }),
         }
         if let Err(e) = es.save(&fsx::entries_path()) {
             log_warn!("entries.json save failed: {e}");
@@ -1209,8 +1211,8 @@ impl Toolbar {
     }
 
     fn launch_entry(&mut self, i: usize) {
-        let path = match self.entries.borrow().entries.get(i) {
-            Some(e) => e.path.clone(),
+        let (path, args, working_dir) = match self.entries.borrow().entries.get(i) {
+            Some(e) => (e.path.clone(), e.args.clone(), e.working_dir.clone()),
             None => return,
         };
         if !path.exists() {
@@ -1221,7 +1223,7 @@ impl Toolbar {
             }
             return;
         }
-        match crate::launch::launch(&path) {
+        match crate::launch::launch(&path, &args, working_dir.as_deref()) {
             Ok(()) => {
                 log_info!("launched {}", path.display());
                 self.hide();

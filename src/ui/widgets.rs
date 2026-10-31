@@ -187,6 +187,7 @@ pub enum Event {
     Selected(WidgetId, usize),
     TextChanged(WidgetId),
     HotkeyChanged(WidgetId, Option<Hotkey>),
+    FilesDropped(Vec<std::path::PathBuf>),
     Close,
     Submit,
     Cancel,

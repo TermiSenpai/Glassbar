@@ -20,18 +20,27 @@ pub struct Entry {
     pub icon: IconSource,
     #[serde(default)]
     pub created_at: String,
+    /// Argumentos heredados de un acceso directo resuelto. No se editan en la interfaz.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub args: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<PathBuf>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Entry {
+    /// Entrada nueva para un archivo. Un `.lnk` se resuelve a su destino, con argumentos y directorio.
     pub fn for_file(path: &Path) -> Entry {
+        let (target, args, working_dir) = crate::shortcut::effective_target(path);
         Entry {
             id: new_id(),
             name: default_name(path),
-            path: path.to_path_buf(),
-            icon: default_icon(path),
+            icon: default_icon(&target),
+            path: target,
             created_at: crate::fsx::now_iso(),
+            args,
+            working_dir,
             extra: Default::default(),
         }
     }
@@ -164,7 +173,7 @@ mod tests {
     use super::*;
 
     fn e(id: &str) -> Entry {
-        Entry { id: id.into(), name: id.into(), path: PathBuf::from(format!("C:\\{id}.bat")), icon: IconSource::None, created_at: String::new(), extra: Default::default() }
+        Entry { id: id.into(), name: id.into(), path: PathBuf::from(format!("C:\\{id}.bat")), icon: IconSource::None, created_at: String::new(), args: String::new(), working_dir: None, extra: Default::default() }
     }
 
     #[test]

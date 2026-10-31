@@ -59,7 +59,7 @@ pub fn convert(data_json: &str, icon_exists: &dyn Fn(&Path) -> bool) -> Result<V
             _ => (default_icon(&path), None),
         };
         out.push(Converted {
-            entry: Entry { id, name, path, icon, created_at: normalize_date(le.created_at), extra: Default::default() },
+            entry: Entry { id, name, path, icon, created_at: normalize_date(le.created_at), args: String::new(), working_dir: None, extra: Default::default() },
             copy_icon_from,
         });
     }

@@ -166,7 +166,9 @@ El menú es una ventana popup de cristal con iconos a la izquierda, elemento res
 - Arrastrar uno o varios archivos sobre la barra: se añaden al final sin diálogo. Las extensiones no admitidas se ignoran y la barra muestra 2,5 s el aviso "Tipo de archivo no admitido".
 - Reglas al elegir un archivo, tanto en el diálogo como al soltar:
   - Nombre: el del archivo sin extensión, si el usuario no había escrito uno.
+  - Un `.lnk` se resuelve a su archivo original: la entrada guarda la ruta del destino, sus argumentos y su directorio de trabajo, y usa el nombre del acceso directo. Así el acceso directo puede borrarse. Si el destino no es un archivo, se guarda el `.lnk` tal cual.
   - Icono: `.exe` y `.lnk` usan el icono del archivo; `.bat` y `.cmd` quedan sin icono.
+- El diálogo de nueva entrada y editar también acepta archivos arrastrados: el primero admitido rellena la ruta como si se hubiera elegido con Examinar.
 
 ### 5.8 Diálogo de nueva entrada y editar
 

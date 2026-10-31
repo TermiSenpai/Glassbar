@@ -25,7 +25,7 @@ Si usabas BatLauncher, tus entradas e iconos se importan solos la primera vez qu
 | Abrir la barra | Clic en el icono anclado. |
 | Lanzar una entrada | Clic en su icono, o enfócala con las flechas y pulsa Enter. |
 | Cerrar la barra | Escape, clic en cualquier otro sitio, o lanzar una entrada. |
-| Añadir una entrada | Clic en **+**, o arrastra archivos `.bat`, `.cmd`, `.exe` o `.lnk` sobre la barra. |
+| Añadir una entrada | Clic en **+**, o arrastra archivos `.bat`, `.cmd`, `.exe` o `.lnk` sobre la barra o sobre la ventana de nueva entrada. Los accesos directos se resuelven a su destino, así que el `.lnk` puede borrarse después. |
 | Editar, reordenar, quitar | Clic derecho en un icono. |
 | Muchas entradas | La barra se limita al 80 % de la pantalla y pasa a carrusel: arrástralo, usa la rueda o las flechas de los extremos. |
 | Ajustes | Clic en el engranaje. |

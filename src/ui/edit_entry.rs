@@ -21,6 +21,8 @@ pub struct EditResult {
     /// Icono resultante: `Custom` con `file` vacío significa "copiar desde `custom_src`".
     pub icon: IconSource,
     pub custom_src: Option<PathBuf>,
+    pub args: String,
+    pub working_dir: Option<PathBuf>,
 }
 
 const PREVIEW_PX: f32 = 46.0;
@@ -41,6 +43,23 @@ struct State {
     use_file_icon: bool,
     scale: f32,
     hwnd: HWND,
+}
+
+/// Aplica un archivo elegido o soltado: resuelve `.lnk`, rellena ruta, nombre e icono por defecto.
+fn apply_picked_file(form: &mut Form, s: &mut State, picked: &Path, name: u32, path: u32) {
+    let prev_default = entries::default_name(&s.entry.path);
+    let current_name = form.text(name);
+    let (target, args, working_dir) = crate::shortcut::effective_target(picked);
+    s.entry.path = target.clone();
+    s.entry.args = args;
+    s.entry.working_dir = working_dir;
+    form.set_text(path, &target.to_string_lossy());
+    if current_name.trim().is_empty() || current_name == prev_default {
+        form.set_text(name, &entries::default_name(picked));
+    }
+    if s.icon_src.is_none() && s.icon_custom_existing.is_none() {
+        s.use_file_icon = matches!(entries::default_icon(&target), IconSource::File);
+    }
 }
 
 impl State {
@@ -73,7 +92,7 @@ impl State {
 /// Abre el diálogo. `existing` = editar; `None` = nueva entrada. `on_done` recibe el resultado o `None` si se cancela.
 pub fn open(gfx: &Rc<Gfx>, pal: &Palette, existing: Option<Entry>, on_done: Box<dyn FnOnce(Option<EditResult>)>) -> Result<()> {
     let is_new = existing.is_none();
-    let entry = existing.unwrap_or_else(|| Entry { id: entries::new_id(), name: String::new(), path: PathBuf::new(), icon: IconSource::None, created_at: crate::fsx::now_iso(), extra: Default::default() });
+    let entry = existing.unwrap_or_else(|| Entry { id: entries::new_id(), name: String::new(), path: PathBuf::new(), icon: IconSource::None, created_at: crate::fsx::now_iso(), args: String::new(), working_dir: None, extra: Default::default() });
     let title = if is_new { t("dialog.new_entry") } else { t("dialog.edit_entry") };
     let icon_custom_existing = match &entry.icon {
         IconSource::Custom { file } => Some(crate::fsx::icons_dir().join(file)),
@@ -131,16 +150,14 @@ pub fn open(gfx: &Rc<Gfx>, pal: &Palette, existing: Option<Entry>, on_done: Box<
             Event::Clicked(id) if id == browse => {
                 let filters = [(t("picker.files"), "*.bat;*.cmd;*.exe;*.lnk"), (t("picker.all"), "*.*")];
                 if let Some(p) = crate::launch::pick_file(s.hwnd, &filters) {
-                    let prev_default = entries::default_name(&s.entry.path);
-                    let current_name = form.text(name);
-                    s.entry.path = p.clone();
-                    form.set_text(path, &p.to_string_lossy());
-                    if current_name.trim().is_empty() || current_name == prev_default {
-                        form.set_text(name, &entries::default_name(&p));
-                    }
-                    if s.icon_src.is_none() && s.icon_custom_existing.is_none() {
-                        s.use_file_icon = matches!(entries::default_icon(&p), IconSource::File);
-                    }
+                    apply_picked_file(form, &mut s, &p, name, path);
+                }
+                refresh2(form, &s);
+                DialogAction::Relayout
+            }
+            Event::FilesDropped(paths) => {
+                if let Some(p) = paths.iter().find(|p| entries::is_supported(p)) {
+                    apply_picked_file(form, &mut s, p, name, path);
                 }
                 refresh2(form, &s);
                 DialogAction::Relayout
@@ -172,7 +189,12 @@ pub fn open(gfx: &Rc<Gfx>, pal: &Palette, existing: Option<Entry>, on_done: Box<
             }
             Event::TextChanged(id) => {
                 if id == path {
-                    s.entry.path = PathBuf::from(form.text(path).trim());
+                    let typed = PathBuf::from(form.text(path).trim());
+                    if typed != s.entry.path {
+                        s.entry.path = typed;
+                        s.entry.args.clear();
+                        s.entry.working_dir = None;
+                    }
                 }
                 refresh2(form, &s);
                 DialogAction::Relayout
@@ -212,7 +234,7 @@ fn finish(form: &mut Form, s: &State, done: &mut Option<Box<dyn FnOnce(Option<Ed
     if n.is_empty() || p.as_os_str().is_empty() {
         return DialogAction::Repaint;
     }
-    let result = EditResult { name: n, path: p, icon: s.current_icon_source(), custom_src: s.icon_src.clone() };
+    let result = EditResult { name: n, path: p, icon: s.current_icon_source(), custom_src: s.icon_src.clone(), args: s.entry.args.clone(), working_dir: s.entry.working_dir.clone() };
     if let Some(f) = done.take() {
         f(Some(result));
     }
