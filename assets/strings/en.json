@@ -73,6 +73,7 @@
   "settings.update.verify_failed": "The download failed verification",
   "settings.update.not_writable": "Cannot write to the program folder",
   "settings.update.updated": "Updated to {0}",
+  "settings.update.restarting": "Restarting…",
   "settings.update.now": "Check now",
   "settings.update.apply": "Update",
   "settings.data": "Data",

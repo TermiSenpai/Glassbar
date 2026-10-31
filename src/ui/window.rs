@@ -436,3 +436,16 @@ pub fn now_ms() -> u64 {
 pub fn gdi_unused() -> HGDIOBJ {
     HGDIOBJ::default()
 }
+
+/// Acepta archivos arrastrados desde el Explorador. Si el proceso corre elevado, UIPI bloquea
+/// `WM_DROPFILES` y `WM_COPYGLOBALDATA`; el filtro los permite para que el arrastre funcione igual.
+pub fn accept_drops(hwnd: HWND) {
+    use windows::Win32::UI::Shell::DragAcceptFiles;
+    const WM_COPYGLOBALDATA: u32 = 0x0049;
+    unsafe {
+        DragAcceptFiles(hwnd, true);
+        for msg in [WM_DROPFILES, WM_COPYDATA, WM_COPYGLOBALDATA] {
+            let _ = ChangeWindowMessageFilterEx(hwnd, msg, MSGFLT_ALLOW, None);
+        }
+    }
+}

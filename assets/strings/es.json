@@ -73,6 +73,7 @@
   "settings.update.verify_failed": "La descarga no supera la verificación",
   "settings.update.not_writable": "No se puede escribir en la carpeta del programa",
   "settings.update.updated": "Actualizado a {0}",
+  "settings.update.restarting": "Reiniciando…",
   "settings.update.now": "Buscar ahora",
   "settings.update.apply": "Actualizar",
   "settings.data": "Datos",

@@ -13,7 +13,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::UI::Controls::{MARGINS, WM_MOUSELEAVE};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
+use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, Result};
 
@@ -70,7 +70,7 @@ impl Dialog {
         }
         let win = Window::create(gfx, "Glassbar.Dialog", PopupStyle::DIALOG, w, h, handler)?;
         win.set_title(title);
-        unsafe { DragAcceptFiles(win.hwnd, true) };
+        window::accept_drops(win.hwnd);
         let x = mon.work_phys.left + ((mon.work_phys.right - mon.work_phys.left) - w) / 2;
         let y = mon.work_phys.top + ((mon.work_phys.bottom - mon.work_phys.top) - h) / 2;
         win.move_to(x, y, w, h);

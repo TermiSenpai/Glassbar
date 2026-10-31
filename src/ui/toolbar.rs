@@ -31,7 +31,6 @@ use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectComposition::*;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::DragAcceptFiles;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::Result;
 
@@ -210,7 +209,7 @@ impl Toolbar {
         }
         let handler: Handler = self.self_weak.upgrade().expect("toolbar alive");
         let win = Window::create_hwnd("Glassbar.Bar", PopupStyle::BAR, 10, 10, handler)?;
-        unsafe { DragAcceptFiles(win.hwnd, true) };
+        window::accept_drops(win.hwnd);
         self.win = Some(win);
         Ok(())
     }

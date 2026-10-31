@@ -17,6 +17,8 @@ pub enum UpdateEvent {
     VerifyFailed,
     NotWritable,
     Applying,
+    /// El exe ya está reemplazado: el hilo de interfaz relanza y sale.
+    Swapped { exe: PathBuf, old: PathBuf },
 }
 
 fn post(hwnd: isize, ev: UpdateEvent) {
@@ -72,10 +74,12 @@ pub fn spawn_apply(hwnd: isize, v: Version) {
                 return Err(UpdateEvent::VerifyFailed);
             }
             post(hwnd, UpdateEvent::Applying);
-            swap_and_relaunch(&exe_tmp).map_err(|e| match e {
+            let (exe, old) = swap(&exe_tmp).map_err(|e| match e {
                 SwapError::NotWritable => UpdateEvent::NotWritable,
                 SwapError::Other(m) => UpdateEvent::Error(m),
-            })
+            })?;
+            post(hwnd, UpdateEvent::Swapped { exe, old });
+            Ok(())
         };
         if let Err(ev) = run() {
             post(hwnd, ev);
@@ -88,8 +92,8 @@ pub enum SwapError {
     Other(String),
 }
 
-/// Renombra el exe actual a `.old`, coloca el nuevo y lo relanza con `--updated`.
-pub fn swap_and_relaunch(new_exe: &Path) -> Result<(), SwapError> {
+/// Renombra el exe actual a `.old` y coloca el nuevo. Devuelve (exe, old) para relanzar desde el hilo de interfaz.
+pub fn swap(new_exe: &Path) -> Result<(PathBuf, PathBuf), SwapError> {
     let exe = std::env::current_exe().map_err(|e| SwapError::Other(e.to_string()))?;
     let dir = exe.parent().ok_or(SwapError::Other("exe dir".into()))?;
     let probe = dir.join(".glassbar-write-test");
@@ -104,9 +108,18 @@ pub fn swap_and_relaunch(new_exe: &Path) -> Result<(), SwapError> {
         let _ = std::fs::rename(&old, &exe);
         return Err(SwapError::Other(format!("place new: {e}")));
     }
-    std::process::Command::new(&exe).arg("--updated").arg(&old).spawn().map_err(|e| SwapError::Other(format!("relaunch: {e}")))?;
-    window::post_quit();
-    Ok(())
+    Ok((exe, old))
+}
+
+/// En el hilo de interfaz: lanza el exe nuevo con `--updated` y termina este proceso.
+pub fn relaunch_and_quit(exe: &Path, old: &Path) {
+    match std::process::Command::new(exe).arg("--updated").arg(old).spawn() {
+        Ok(_) => {
+            log_info!("update applied; relaunching {}", exe.display());
+            window::post_quit();
+        }
+        Err(e) => log_warn!("relaunch failed: {e}"),
+    }
 }
 
 /// Borra el `.old` que dejó la actualización anterior, con reintentos.
@@ -146,7 +159,12 @@ pub fn on_event(ev: UpdateEvent) {
         UpdateEvent::Downloading(p) => UpdateState::Downloading(p),
         UpdateEvent::VerifyFailed => UpdateState::VerifyFailed,
         UpdateEvent::NotWritable => UpdateState::NotWritable,
-        UpdateEvent::Applying => UpdateState::Downloading(100),
+        UpdateEvent::Applying => UpdateState::Restarting,
+        UpdateEvent::Swapped { exe, old } => {
+            crate::app::set_update_state(UpdateState::Restarting);
+            relaunch_and_quit(&exe, &old);
+            return;
+        }
     };
     crate::app::set_update_state(state);
 }

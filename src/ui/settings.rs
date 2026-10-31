@@ -26,6 +26,7 @@ pub enum UpdateState {
     VerifyFailed,
     NotWritable,
     Updated(Version),
+    Restarting,
 }
 
 pub struct Ids {
@@ -72,6 +73,7 @@ pub fn status_text(settings: &Settings, state: &UpdateState) -> String {
         UpdateState::VerifyFailed => t("settings.update.verify_failed").to_string(),
         UpdateState::NotWritable => t("settings.update.not_writable").to_string(),
         UpdateState::Updated(v) => tf("settings.update.updated", &[&v.to_string()]),
+        UpdateState::Restarting => t("settings.update.restarting").to_string(),
     }
 }
 
@@ -148,7 +150,7 @@ fn sync_enabled(f: &mut Form, ids: &Ids, settings: &Settings, state: &UpdateStat
     let avail = available_version(settings, state).is_some();
     f.set_visible(ids.apply_update, avail);
     f.set_visible(ids.changes_link, avail);
-    let busy = matches!(state, UpdateState::Checking | UpdateState::Downloading(_));
+    let busy = matches!(state, UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Restarting);
     f.set_enabled(ids.check_now, !busy);
     f.set_enabled(ids.apply_update, !busy);
     f.set_label(ids.version_card, &status_text(settings, state));
