@@ -1,6 +1,6 @@
 [package]
 name = "glassbar"
-version = "2.0.4"
+version = "2.0.5"
 edition = "2024"
 rust-version = "1.85"
 description = "A glass second toolbar for Windows"
@@ -16,6 +16,7 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 windows-numerics = "0.3"
+windows-core = "0.62"
 
 [dependencies.windows]
 version = "0.62"
@@ -41,8 +42,10 @@ features = [
   "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
+  "Win32_System_Ole",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
+  "Win32_System_SystemServices",
   "Win32_System_Threading",
   "Win32_UI_Controls",
   "Win32_UI_HiDpi",

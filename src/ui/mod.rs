@@ -2,6 +2,7 @@
 
 pub mod clipboard;
 pub mod dialog;
+pub mod droptarget;
 pub mod edit_entry;
 pub mod layout;
 pub mod menu;

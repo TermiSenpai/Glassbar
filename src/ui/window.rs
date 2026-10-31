@@ -87,6 +87,7 @@ fn unregister(hwnd: HWND) {
 pub fn destroy_all_windows() {
     let list: Vec<isize> = WINDOWS.lock().map(|w| w.clone()).unwrap_or_default();
     for h in list {
+        crate::ui::droptarget::revoke(HWND(h as *mut c_void));
         unsafe {
             let _ = DestroyWindow(HWND(h as *mut c_void));
         }
@@ -253,6 +254,7 @@ impl Window {
     }
 
     pub fn destroy(&self) {
+        crate::ui::droptarget::revoke(self.hwnd);
         unsafe {
             let _ = DestroyWindow(self.hwnd);
         }
@@ -437,15 +439,15 @@ pub fn gdi_unused() -> HGDIOBJ {
     HGDIOBJ::default()
 }
 
-/// Acepta archivos arrastrados desde el Explorador. Si el proceso corre elevado, UIPI bloquea
-/// `WM_DROPFILES` y `WM_COPYGLOBALDATA`; el filtro los permite para que el arrastre funcione igual.
+/// Acepta archivos arrastrados desde el Explorador mediante un destino OLE registrado. No se
+/// activa `WS_EX_ACCEPTFILES` para que OLE consulte siempre el destino registrado y no la ruta heredada.
+/// Si el proceso corre elevado, UIPI bloquea `WM_DROPFILES` y `WM_COPYGLOBALDATA`; el filtro los permite.
 pub fn accept_drops(hwnd: HWND) {
-    use windows::Win32::UI::Shell::DragAcceptFiles;
     const WM_COPYGLOBALDATA: u32 = 0x0049;
     unsafe {
-        DragAcceptFiles(hwnd, true);
         for msg in [WM_DROPFILES, WM_COPYDATA, WM_COPYGLOBALDATA] {
             let _ = ChangeWindowMessageFilterEx(hwnd, msg, MSGFLT_ALLOW, None);
         }
     }
+    crate::ui::droptarget::register(hwnd);
 }

@@ -29,6 +29,7 @@ Se pasa con `target\release\Glassbar.exe` antes de cada release. Marcado el esta
 - [x] Botón + abre el diálogo de nueva entrada; la barra se oculta y el proceso sigue vivo hasta cerrarlo.
 - [ ] Guardar una entrada nueva con icono personalizado desde una imagen y desde un exe. (pendiente de pasar a mano)
 - [x] Arrastrar un `.lnk` sobre el diálogo de nueva entrada rellena ruta (destino resuelto), nombre e icono; al guardar, la entrada conserva argumentos y directorio de trabajo. (verificado con datos aislados)
+- [x] Arrastre OLE real (origen `DoDragDrop` con `CF_HDROP`) sobre el diálogo: el destino registrado recibe `DragEnter` con efecto copiar y el `Drop` rellena el formulario. (2026-10-31, seis arrastres seguidos con datos aislados)
 - [ ] Arrastrar archivos admitidos y no admitidos sobre la barra. (pendiente de pasar a mano)
 - [x] Quitar abre un popover de cristal sobre el icono; Enter confirma, quita la entrada y reconstruye la barra. (verificado con datos aislados)
 

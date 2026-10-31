@@ -169,6 +169,7 @@ El menú es una ventana popup de cristal con iconos a la izquierda, elemento res
   - Un `.lnk` se resuelve a su archivo original: la entrada guarda la ruta del destino, sus argumentos y su directorio de trabajo, y usa el nombre del acceso directo. Así el acceso directo puede borrarse. Si el destino no es un archivo, se guarda el `.lnk` tal cual.
   - Icono: `.exe` y `.lnk` usan el icono del archivo; `.bat` y `.cmd` quedan sin icono.
 - El diálogo de nueva entrada y editar también acepta archivos arrastrados: el primero admitido rellena la ruta como si se hubiera elegido con Examinar.
+- Los arrastres se reciben con un `IDropTarget` registrado (`RegisterDragDrop`) en la barra y en los diálogos (`ui::droptarget`), que convierte el `CF_HDROP` en un `WM_DROPFILES` hacia la propia ventana. No se usa `DragAcceptFiles`: así OLE consulta siempre el destino registrado y no la ruta heredada, que un usuario vio fallar con el cursor de prohibido en 2.0.3.
 
 ### 5.8 Diálogo de nueva entrada y editar
 
@@ -242,7 +243,8 @@ Un único crate binario. Un hilo de interfaz que ejecuta el bucle de mensajes de
 | `main` | Argumentos, instancia única, arranque según modo. | `app` |
 | `app::instance` | Mutex con nombre `Local\Glassbar.SingleInstance` y ventana de mensajes de clase `Glassbar.Messages`. Una segunda instancia concede a la primera permiso de primer plano con `AllowSetForegroundWindow`, envía el mensaje registrado `Glassbar.Toggle` y sale. | Win32 |
 | `app::lifecycle` | Decide residente o salir al ocultar. Bandeja, atajo global y clave de inicio con Windows. | `model::settings`, `ui::window` |
-| `ui::window` | Crea ventanas popup sin bitmap de redirección, DPI por monitor, posición, mostrar y ocultar con animación, pérdida de foco, Escape, arrastrar archivos. | `gfx` |
+| `ui::window` | Crea ventanas popup sin bitmap de redirección, DPI por monitor, posición, mostrar y ocultar con animación, pérdida de foco, Escape. | `gfx` |
+| `ui::droptarget` | Destino OLE de arrastrar y soltar: `OleInitialize`, `RegisterDragDrop`, `CF_HDROP` a `WM_DROPFILES`. | Win32 |
 | `ui::toolbar` | Layout de celdas y controles fijos, carrusel, hit-testing, hover, pulsado, foco, tooltip, lanzamiento. | `ui::window`, `gfx`, `model`, `icons`, `launch` |
 | `ui::menu` | Menú contextual de cristal. | `ui::window`, `ui::widgets` |
 | `ui::widgets` | Interruptor, desplegable, botón, enlace, campo de texto básico, captura de atajo, tarjeta, disposición vertical. | `gfx`, `i18n` |
